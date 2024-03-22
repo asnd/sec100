@@ -3,7 +3,7 @@ stages:
 
 bash_lint:
   stage: lint
-  image: alpine:latest  # Or any other image containing shellcheck
+  image: gitlab-runner:latest # Or any other image containing shellcheck
   script:
     - apk add --no-cache bash  # Install Bash if not available
     - apk add --no-cache shellcheck  # Install shellcheck
