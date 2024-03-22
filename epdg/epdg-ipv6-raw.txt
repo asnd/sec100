@@ -1,0 +1,17 @@
+epdg.epc.mnc020.mcc208.pub.3gppnetwork.org 2001:864:f100::2:c
+epdg.epc.mnc009.mcc262.pub.3gppnetwork.org 2a01:8f1:fe:1000::4
+epdg.epc.mnc023.mcc262.pub.3gppnetwork.org 2a00:fbc:3201:c660:10c:2b52:2:2
+epdg.epc.mnc001.mcc216.pub.3gppnetwork.org 2a00:1878:f806:201::1
+epdg.epc.mnc011.mcc274.pub.3gppnetwork.org 2a01:6f00:4357::4e28:f9db
+epdg.epc.mnc001.mcc250.pub.3gppnetwork.org 2a00:1fa4:0:e::1
+epdg.epc.mnc001.mcc231.pub.3gppnetwork.org 2a01:c840:180:2::1
+epdg.epc.mnc041.mcc293.pub.3gppnetwork.org 2a02:e20:3050::1
+epdg.epc.mnc150.mcc302.pub.3gppnetwork.org 56
+epdg.epc.mnc610.mcc302.pub.3gppnetwork.org 2605:b100:680:1f::2
+epdg.epc.mnc280.mcc310.pub.3gppnetwork.org 2600:387:f:709::1
+epdg.epc.mnc020.mcc310.pub.3gppnetwork.org 2607:d080:3010::1
+epdg.epc.mnc280.mcc310.pub.3gppnetwork.org 2600:387:f:709::1
+epdg.epc.mnc410.mcc310.pub.3gppnetwork.org 2600:387:f:70f::1
+epdg.epc.mnc180.mcc311.pub.3gppnetwork.org 2600:387:f:70a::1
+epdg.epc.mnc650.mcc311.pub.3gppnetwork.org 2604:e140:3:2005::105
+epdg.epc.mnc100.mcc313.pub.3gppnetwork.org 2600:387:f:709::1
