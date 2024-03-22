@@ -7,7 +7,7 @@ bash_lint:
   script:
     - apk add --no-cache bash  # Install Bash if not available
     - apk add --no-cache shellcheck  # Install shellcheck
-    - shellcheck your_script.sh  # Replace with your actual script name
+    - shellcheck *.sh  # Replace with your actual script name
   tags:
     - shell
 
