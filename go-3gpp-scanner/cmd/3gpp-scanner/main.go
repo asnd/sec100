@@ -88,6 +88,14 @@ func scanCmd() *cobra.Command {
 		Short: "Scan 3GPP network infrastructure via DNS",
 		Long: `Enumerate 3GPP network subdomains (ePDG, IMS, BSF, GAN, XCAP) across
 global MCC-MNC combinations to identify exposed telecom infrastructure.`,
+		Example: `  # Scan only ePDG endpoints
+  3gpp-scanner scan --mode=epdg
+
+  # Scan all types and save to database with high concurrency
+  3gpp-scanner scan --mode=all --db=database.db --concurrency=20
+
+  # Scan custom subdomains with rate limiting
+  3gpp-scanner scan --mode=custom --subdomains=ims,bsf --delay=250`,
 		RunE: runScan,
 	}
 
@@ -107,6 +115,11 @@ func pingCmd() *cobra.Command {
 		Use:   "ping",
 		Short: "Test connectivity to discovered FQDNs",
 		Long:  `Ping FQDNs using ICMP (requires root) or TCP connectivity checks.`,
+		Example: `  # TCP connectivity check (no root required)
+  3gpp-scanner ping --file=results.txt --method=tcp
+
+  # ICMP ping with custom timeout and workers, export to JSON
+  sudo 3gpp-scanner ping --file=fqdns.txt --method=icmp --timeout=500 --workers=20 --output=results.json`,
 		RunE:  runPing,
 	}
 
@@ -124,6 +137,11 @@ func queryCmd() *cobra.Command {
 		Use:   "query",
 		Short: "Query the database for operator information",
 		Long:  `Query FQDNs by MNC/MCC or operator name from the SQLite database.`,
+		Example: `  # Query by MNC and MCC
+  3gpp-scanner query --mnc=001 --mcc=310 --db=database.db
+
+  # Query by operator name and export as CSV
+  3gpp-scanner query --operator="Verizon" --db=database.db --export=csv`,
 		RunE:  runQuery,
 	}
 
@@ -141,6 +159,11 @@ func statsCmd() *cobra.Command {
 		Use:   "stats",
 		Short: "Generate statistics from scan results",
 		Long:  `Analyze FQDN files or database and generate statistics.`,
+		Example: `  # Analyze FQDN file with text output
+  3gpp-scanner stats --file=epdg-fqdn-raw.txt
+
+  # Analyze database and export as JSON
+  3gpp-scanner stats --db=database.db --format=json`,
 		RunE:  runStats,
 	}
 
@@ -156,14 +179,88 @@ func fetchMCCMNCCmd() *cobra.Command {
 		Use:   "fetch-mccmnc",
 		Short: "Download MCC-MNC list",
 		Long:  `Download the latest MCC-MNC list from GitHub and save locally.`,
+		Example: `  # Download latest MCC-MNC list
+  3gpp-scanner fetch-mccmnc`,
 		RunE:  runFetchMCCMNC,
 	}
 
 	return cmd
 }
 
+// validateScanFlags validates scan command flags
+func validateScanFlags() error {
+	if scanMode == "custom" && scanSubdomains == "" {
+		return fmt.Errorf("--subdomains required for custom mode")
+	}
+	validModes := map[string]bool{"all": true, "epdg": true, "ims": true, "bsf": true, "gan": true, "xcap": true, "custom": true}
+	if !validModes[scanMode] {
+		return fmt.Errorf("invalid mode: %s", scanMode)
+	}
+	if scanConcurrency <= 0 {
+		return fmt.Errorf("--concurrency must be positive")
+	}
+	if scanDelay < 0 {
+		return fmt.Errorf("--delay cannot be negative")
+	}
+	return nil
+}
+
+// validatePingFlags validates ping command flags
+func validatePingFlags() error {
+	if pingFile == "" {
+		return fmt.Errorf("--file required")
+	}
+	if pingMethod != "icmp" && pingMethod != "tcp" {
+		return fmt.Errorf("invalid method: %s (must be icmp or tcp)", pingMethod)
+	}
+	if pingTimeout <= 0 {
+		return fmt.Errorf("--timeout must be positive")
+	}
+	if pingWorkers <= 0 {
+		return fmt.Errorf("--workers must be positive")
+	}
+	return nil
+}
+
+// validateQueryFlags validates query command flags
+func validateQueryFlags() error {
+	// MNC and MCC must be used together (check this first)
+	if (queryMNC > 0 && queryMCC == 0) || (queryMNC == 0 && queryMCC > 0) {
+		return fmt.Errorf("--mnc and --mcc must be used together")
+	}
+
+	hasMNCMCC := queryMNC > 0 && queryMCC > 0
+	hasOperator := queryOperator != ""
+
+	if !hasMNCMCC && !hasOperator {
+		return fmt.Errorf("either --mnc/--mcc or --operator required")
+	}
+
+	return nil
+}
+
+// validateStatsFlags validates stats command flags
+func validateStatsFlags() error {
+	if statsFile == "" && statsDB == "" {
+		return fmt.Errorf("either --file or --db required")
+	}
+	if statsFile != "" && statsDB != "" {
+		return fmt.Errorf("cannot specify both --file and --db")
+	}
+	validFormats := map[string]bool{"text": true, "json": true, "csv": true}
+	if !validFormats[statsFormat] {
+		return fmt.Errorf("invalid format: %s (must be text, json, or csv)", statsFormat)
+	}
+	return nil
+}
+
 // Scan command implementation
 func runScan(cmd *cobra.Command, args []string) error {
+	// Validate flags
+	if err := validateScanFlags(); err != nil {
+		return err
+	}
+
 	// Determine subdomains based on mode
 	var subdomains []string
 	switch scanMode {
@@ -180,12 +277,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	case "xcap":
 		subdomains = []string{"xcap.ims"}
 	case "custom":
-		if scanSubdomains == "" {
-			return fmt.Errorf("--subdomains required for custom mode")
-		}
 		subdomains = strings.Split(scanSubdomains, ",")
-	default:
-		return fmt.Errorf("invalid mode: %s", scanMode)
 	}
 
 	if !quiet {
@@ -299,8 +391,9 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 // Ping command implementation
 func runPing(cmd *cobra.Command, args []string) error {
-	if pingFile == "" {
-		return fmt.Errorf("--file required")
+	// Validate flags
+	if err := validatePingFlags(); err != nil {
+		return err
 	}
 
 	// Read FQDNs from file
@@ -385,6 +478,11 @@ func runPing(cmd *cobra.Command, args []string) error {
 
 // Query command implementation
 func runQuery(cmd *cobra.Command, args []string) error {
+	// Validate flags
+	if err := validateQueryFlags(); err != nil {
+		return err
+	}
+
 	db, err := database.NewDB(queryDB)
 	if err != nil {
 		return fmt.Errorf("database error: %w", err)
@@ -409,8 +507,6 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		if !quiet {
 			fmt.Printf("Results for operator=%s:\n", queryOperator)
 		}
-	} else {
-		return fmt.Errorf("either --mnc/--mcc or --operator required")
 	}
 
 	// Print results
@@ -427,6 +523,11 @@ func runQuery(cmd *cobra.Command, args []string) error {
 
 // Stats command implementation
 func runStats(cmd *cobra.Command, args []string) error {
+	// Validate flags
+	if err := validateStatsFlags(); err != nil {
+		return err
+	}
+
 	analyzer := stats.NewAnalyzer()
 	var st *models.Stats
 	var err error
@@ -447,8 +548,6 @@ func runStats(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("stats query failed: %w", err)
 		}
-	} else {
-		return fmt.Errorf("either --file or --db required")
 	}
 
 	// Output stats

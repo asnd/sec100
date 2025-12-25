@@ -12,6 +12,8 @@ This is a complete Go port of the Python-based toolkit, consolidating **5 Python
 - **Database Integration**: SQLite database compatible with Python version for storing discovered FQDNs
 - **Statistics & Analysis**: Analyze discovered infrastructure with MCC distribution and subdomain counts
 - **Flexible Export**: Output to JSON, CSV, or plain text formats
+- **Built-in Help System**: Comprehensive help text with usage examples for every command (`--help`)
+- **Robust Validation**: Intelligent flag validation that catches common errors and provides helpful feedback
 - **Single Binary**: No dependencies required at runtime (all-in-one executable)
 
 ## Installation
@@ -80,6 +82,43 @@ sudo ./bin/3gpp-scanner-linux-x86_64 ping --file=epdg-fqdn-raw.txt --method=icmp
 Or use TCP connectivity check (no root required):
 ```bash
 ./bin/3gpp-scanner-linux-x86_64 ping --file=epdg-fqdn-raw.txt --method=tcp
+```
+
+## Help System
+
+Every command includes comprehensive help text with practical usage examples:
+
+```bash
+# Get help for any command
+3gpp-scanner --help              # Main help
+3gpp-scanner scan --help         # Scan command help with examples
+3gpp-scanner ping --help         # Ping command help with examples
+3gpp-scanner query --help        # Query command help with examples
+3gpp-scanner stats --help        # Stats command help with examples
+```
+
+Each help page includes:
+- Command description
+- Practical usage examples
+- Complete flag reference
+- Default values
+
+### Flag Validation
+
+The CLI performs intelligent validation and provides helpful error messages:
+
+```bash
+# Missing required flags
+$ 3gpp-scanner scan --mode=custom
+Error: --subdomains required for custom mode
+
+# Invalid flag combinations
+$ 3gpp-scanner query --mnc=001
+Error: --mnc and --mcc must be used together
+
+# Invalid values
+$ 3gpp-scanner scan --concurrency=0
+Error: --concurrency must be positive
 ```
 
 ## Usage
@@ -348,6 +387,27 @@ make deps            # Install dependencies
 make help            # Show all targets
 ```
 
+## Testing
+
+The project includes comprehensive test coverage for CLI flag validation:
+
+```bash
+# Run all tests
+go test ./...
+
+# Run with verbose output
+go test ./cmd/3gpp-scanner/... -v
+
+# Run with coverage
+make test-coverage
+```
+
+Test coverage includes:
+- Flag validation for all commands (scan, ping, query, stats)
+- Invalid flag combination detection
+- Edge case handling (negative values, zero values, etc.)
+- Proper error message validation
+
 ## Dependencies
 
 Runtime: **None** (static binary)
@@ -428,8 +488,11 @@ Improvements welcome! Areas for contribution:
 
 - [ ] IPv6 (AAAA record) support
 - [ ] Additional output formats
-- [ ] Progress bars for long-running scans
+- [x] Built-in help with usage examples
+- [x] Flag validation with helpful error messages
+- [x] Comprehensive test coverage
 - [ ] Configuration file support
+- [ ] Shell completion (bash/zsh)
 - [ ] Parallel DNS server queries
 - [ ] GeoIP integration for country mapping
 
