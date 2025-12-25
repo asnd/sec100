@@ -1,0 +1,101 @@
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Go build directories
+bin/
+dist/
+build/
+
+# Go test coverage
+*.out
+*.test
+coverage.html
+coverage.out
+
+# Go modules
+go.sum
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+*.cover
+
+# SQLite databases (optional - comment out if you want to track them)
+*.db
+database.db
+
+# Large data files
+*.pcap
+*.pcapng
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Sensitive files (examples - adjust as needed)
+.env
+.env.local
+secrets.json
+credentials.json
+config.local.yaml
+api_keys.txt
+
+# Build artifacts
+/go-3gpp-scanner/bin/
+/go-3gpp-scanner/*.exe
+/go-3gpp-scanner/coverage.html
+/go-3gpp-scanner/coverage.out
+
+# Cache directories
+.cache/
+.gradle/
+
+# Node modules (if any)
+node_modules/
+npm-debug.log
+
+# Yarn
+yarn-error.log
