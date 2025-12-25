@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"3gpp-scanner/internal/models"
@@ -16,7 +17,8 @@ import (
 
 // Pinger handles connectivity testing
 type Pinger struct {
-	config *models.PingConfig
+	config       *models.PingConfig
+	progressFunc func(current, total int, successful int)
 }
 
 // NewPinger creates a new pinger
@@ -27,23 +29,32 @@ func NewPinger(config *models.PingConfig) *Pinger {
 	return &Pinger{config: config}
 }
 
+// SetProgressCallback sets a callback function for progress updates
+func (p *Pinger) SetProgressCallback(callback func(current, total int, successful int)) {
+	p.progressFunc = callback
+}
+
 // Ping tests connectivity to multiple FQDNs
 func (p *Pinger) Ping(ctx context.Context, fqdns []string) ([]models.PingResult, error) {
 	results := make([]models.PingResult, 0, len(fqdns))
 	resultsMux := &sync.Mutex{}
 
-	jobs := make(chan string, len(fqdns))
+	totalJobs := len(fqdns)
+	jobs := make(chan string, totalJobs)
 	for _, fqdn := range fqdns {
 		jobs <- fqdn
 	}
 	close(jobs)
+
+	// Progress tracking
+	var processed, successful atomic.Int64
 
 	var wg sync.WaitGroup
 	for i := 0; i < p.config.Workers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p.worker(ctx, jobs, &results, resultsMux)
+			p.worker(ctx, jobs, &results, resultsMux, &processed, &successful, totalJobs)
 		}()
 	}
 
@@ -52,7 +63,7 @@ func (p *Pinger) Ping(ctx context.Context, fqdns []string) ([]models.PingResult,
 }
 
 // worker processes ping jobs
-func (p *Pinger) worker(ctx context.Context, jobs <-chan string, results *[]models.PingResult, mux *sync.Mutex) {
+func (p *Pinger) worker(ctx context.Context, jobs <-chan string, results *[]models.PingResult, mux *sync.Mutex, processed, successful *atomic.Int64, totalJobs int) {
 	for fqdn := range jobs {
 		select {
 		case <-ctx.Done():
@@ -69,6 +80,16 @@ func (p *Pinger) worker(ctx context.Context, jobs <-chan string, results *[]mode
 				mux.Lock()
 				*results = append(*results, result)
 				mux.Unlock()
+			}
+
+			if result.Success {
+				successful.Add(1)
+			}
+
+			// Update progress
+			current := int(processed.Add(1))
+			if p.progressFunc != nil {
+				p.progressFunc(current, totalJobs, int(successful.Load()))
 			}
 		}
 	}

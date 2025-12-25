@@ -16,6 +16,7 @@ import (
 	"3gpp-scanner/internal/ping"
 	"3gpp-scanner/internal/stats"
 
+	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
 
@@ -221,6 +222,33 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	scanner := dns.NewScanner(config)
 
+	// Setup progress bar if not quiet/verbose
+	totalQueries := len(entries) * len(subdomains)
+	var bar *progressbar.ProgressBar
+	if !quiet && !verbose {
+		bar = progressbar.NewOptions(totalQueries,
+			progressbar.OptionSetDescription("Scanning DNS"),
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionShowCount(),
+			progressbar.OptionShowIts(),
+			progressbar.OptionSetPredictTime(true),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "[green]=[reset]",
+				SaucerHead:    "[green]>[reset]",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}),
+			progressbar.OptionOnCompletion(func() {
+				fmt.Fprintf(os.Stderr, "\n")
+			}),
+		)
+
+		scanner.SetProgressCallback(func(current, total int, found int) {
+			bar.Set(current)
+		})
+	}
+
 	// Run scan
 	ctx := context.Background()
 	results, err := scanner.Scan(ctx, entries)
@@ -229,7 +257,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	if !quiet {
-		fmt.Printf("\nScan complete! Found %d FQDNs\n", len(results))
+		fmt.Printf("Scan complete! Found %d FQDNs\n", len(results))
 	}
 
 	// Print to stdout if not quiet
@@ -295,6 +323,32 @@ func runPing(cmd *cobra.Command, args []string) error {
 	}
 
 	pinger := ping.NewPinger(config)
+
+	// Setup progress bar if not quiet/verbose
+	var bar *progressbar.ProgressBar
+	if !quiet && !verbose {
+		bar = progressbar.NewOptions(len(fqdns),
+			progressbar.OptionSetDescription(fmt.Sprintf("Pinging (%s)", pingMethod)),
+			progressbar.OptionSetWriter(os.Stderr),
+			progressbar.OptionShowCount(),
+			progressbar.OptionShowIts(),
+			progressbar.OptionSetPredictTime(true),
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "[cyan]=[reset]",
+				SaucerHead:    "[cyan]>[reset]",
+				SaucerPadding: " ",
+				BarStart:      "[",
+				BarEnd:        "]",
+			}),
+			progressbar.OptionOnCompletion(func() {
+				fmt.Fprintf(os.Stderr, "\n")
+			}),
+		)
+
+		pinger.SetProgressCallback(func(current, total int, successful int) {
+			bar.Set(current)
+		})
+	}
 
 	// Run ping
 	ctx := context.Background()

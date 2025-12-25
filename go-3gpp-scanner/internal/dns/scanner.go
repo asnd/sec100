@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"3gpp-scanner/internal/models"
@@ -15,9 +16,10 @@ import (
 
 // Scanner handles DNS resolution for 3GPP FQDNs
 type Scanner struct {
-	config      *models.ScanConfig
-	rateLimiter *rate.Limiter
-	dnsClient   *dns.Client
+	config       *models.ScanConfig
+	rateLimiter  *rate.Limiter
+	dnsClient    *dns.Client
+	progressFunc func(current, total int, found int)
 }
 
 // job represents a DNS resolution task
@@ -43,13 +45,19 @@ func NewScanner(config *models.ScanConfig) *Scanner {
 	}
 }
 
+// SetProgressCallback sets a callback function for progress updates
+func (s *Scanner) SetProgressCallback(callback func(current, total int, found int)) {
+	s.progressFunc = callback
+}
+
 // Scan performs DNS scanning for all MCC-MNC combinations
 func (s *Scanner) Scan(ctx context.Context, entries []models.MCCMNCEntry) ([]models.DNSResult, error) {
 	results := make([]models.DNSResult, 0)
 	resultsMux := &sync.Mutex{}
 
 	// Create work queue
-	jobs := make(chan job, len(entries)*len(s.config.Subdomains))
+	totalJobs := len(entries) * len(s.config.Subdomains)
+	jobs := make(chan job, totalJobs)
 
 	// Fill job queue
 	for _, entry := range entries {
@@ -59,13 +67,16 @@ func (s *Scanner) Scan(ctx context.Context, entries []models.MCCMNCEntry) ([]mod
 	}
 	close(jobs)
 
+	// Progress tracking
+	var processed, found atomic.Int64
+
 	// Start workers
 	var wg sync.WaitGroup
 	for i := 0; i < s.config.Concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.worker(ctx, jobs, &results, resultsMux)
+			s.worker(ctx, jobs, &results, resultsMux, &processed, &found, totalJobs)
 		}()
 	}
 
@@ -75,7 +86,7 @@ func (s *Scanner) Scan(ctx context.Context, entries []models.MCCMNCEntry) ([]mod
 }
 
 // worker processes DNS resolution jobs
-func (s *Scanner) worker(ctx context.Context, jobs <-chan job, results *[]models.DNSResult, mux *sync.Mutex) {
+func (s *Scanner) worker(ctx context.Context, jobs <-chan job, results *[]models.DNSResult, mux *sync.Mutex, processed, found *atomic.Int64, totalJobs int) {
 	for j := range jobs {
 		select {
 		case <-ctx.Done():
@@ -92,9 +103,17 @@ func (s *Scanner) worker(ctx context.Context, jobs <-chan job, results *[]models
 				*results = append(*results, *result)
 				mux.Unlock()
 
+				found.Add(1)
+
 				if s.config.Verbose {
 					fmt.Printf("Found A record for %s (%s IPs)\n", result.FQDN, formatIPCount(len(result.IPs)))
 				}
+			}
+
+			// Update progress
+			current := int(processed.Add(1))
+			if s.progressFunc != nil {
+				s.progressFunc(current, totalJobs, int(found.Load()))
 			}
 		}
 	}
