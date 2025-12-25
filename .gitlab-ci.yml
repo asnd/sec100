@@ -1,21 +1,233 @@
 stages:
-  - lint
+  - test
+  - build
 
-bash_lint:
-  stage: lint
-  image: gitlab-runner:latest # Or any other image containing shellcheck
-  script:
-    - apk add --no-cache bash  # Install Bash if not available
-    - apk add --no-cache shellcheck  # Install shellcheck
-    - shellcheck *.sh  # Replace with your actual script name
-  tags:
-    - shell
+variables:
+  GO_VERSION: "1.21"
+  DOCKER_DRIVER: overlay2
+  CGO_ENABLED: "1"
 
-yaml_lint:
-  stage: lint
-  image: python:3.9  # Or any other image containing yamllint
+# Default image for all jobs
+image: golang:1.21-bullseye
+
+before_script:
+  - echo "Go version:" && go version
+  - echo "Working in:" && pwd
+
+# Unit Tests
+test:unit:
+  stage: test
   script:
-    - pip install yamllint  # Install yamllint
-    - yamllint your_config.yaml  # Replace with your actual YAML file name
-  tags:
-    - yaml
+    - cd go-3gpp-scanner
+    - go mod download
+    - go test -v -race -coverprofile=coverage.out ./...
+    - go tool cover -func=coverage.out
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: go-3gpp-scanner/coverage.out
+    paths:
+      - go-3gpp-scanner/coverage.out
+    expire_in: 30 days
+  coverage: '/coverage: \d+\.?\d*%/'
+
+# Linting
+test:lint:
+  stage: test
+  script:
+    - cd go-3gpp-scanner
+    - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    - golangci-lint run ./... --timeout 5m
+  allow_failure: true
+
+# Format check
+test:fmt:
+  stage: test
+  script:
+    - cd go-3gpp-scanner
+    - |
+      if [ -n "$(gofmt -s -l .)" ]; then
+        echo "Go code is not formatted:"
+        gofmt -s -d .
+        exit 1
+      fi
+
+# Build for Linux x86_64
+build:linux-amd64:
+  stage: build
+  needs: ["test:unit"]
+  before_script:
+    - apt-get update && apt-get install -y build-essential
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - |
+      GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \
+      go build \
+        -ldflags="-s -w -X main.version=${CI_COMMIT_SHA:0:8}" \
+        -o bin/3gpp-scanner-linux-amd64 \
+        ./cmd/3gpp-scanner
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/3gpp-scanner-linux-amd64
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+
+# Build for Linux ARM64
+build:linux-arm64:
+  stage: build
+  needs: ["test:unit"]
+  before_script:
+    - apt-get update && apt-get install -y build-essential gcc-aarch64-linux-gnu
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - |
+      GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
+      go build \
+        -ldflags="-s -w -X main.version=${CI_COMMIT_SHA:0:8}" \
+        -o bin/3gpp-scanner-linux-arm64 \
+        ./cmd/3gpp-scanner
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/3gpp-scanner-linux-arm64
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+
+# Build for Linux ARM (32-bit)
+build:linux-arm:
+  stage: build
+  needs: ["test:unit"]
+  before_script:
+    - apt-get update && apt-get install -y build-essential gcc-arm-linux-gnueabihf
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - |
+      GOOS=linux GOARCH=arm CGO_ENABLED=1 CC=arm-linux-gnueabihf-gcc \
+      go build \
+        -ldflags="-s -w -X main.version=${CI_COMMIT_SHA:0:8}" \
+        -o bin/3gpp-scanner-linux-arm \
+        ./cmd/3gpp-scanner
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/3gpp-scanner-linux-arm
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+
+# Build for macOS x86_64
+build:macos-amd64:
+  stage: build
+  needs: ["test:unit"]
+  image: golang:1.21-alpine
+  before_script:
+    - apk add --no-cache build-base
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - |
+      GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
+      go build \
+        -ldflags="-s -w -X main.version=${CI_COMMIT_SHA:0:8}" \
+        -o bin/3gpp-scanner-darwin-amd64 \
+        ./cmd/3gpp-scanner
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/3gpp-scanner-darwin-amd64
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+
+# Build for macOS ARM64
+build:macos-arm64:
+  stage: build
+  needs: ["test:unit"]
+  image: golang:1.21-alpine
+  before_script:
+    - apk add --no-cache build-base
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - |
+      GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+      go build \
+        -ldflags="-s -w -X main.version=${CI_COMMIT_SHA:0:8}" \
+        -o bin/3gpp-scanner-darwin-arm64 \
+        ./cmd/3gpp-scanner
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/3gpp-scanner-darwin-arm64
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+
+# Build for Windows x86_64
+build:windows-amd64:
+  stage: build
+  needs: ["test:unit"]
+  before_script:
+    - apt-get update && apt-get install -y build-essential gcc-mingw-w64-x86-64
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - |
+      GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
+      go build \
+        -ldflags="-s -w -X main.version=${CI_COMMIT_SHA:0:8}" \
+        -o bin/3gpp-scanner-windows-amd64.exe \
+        ./cmd/3gpp-scanner
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/3gpp-scanner-windows-amd64.exe
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
+
+# Build all platforms in single job
+build:all:
+  stage: build
+  needs: ["test:unit"]
+  before_script:
+    - apt-get update
+    - apt-get install -y build-essential gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf gcc-mingw-w64-x86-64
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - make build-all
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/
+    expire_in: 30 days
+  only:
+    - main
+
+# Build static binary (no CGO)
+build:static:
+  stage: build
+  needs: ["test:unit"]
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - |
+      GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+      go build \
+        -ldflags="-s -w -X main.version=${CI_COMMIT_SHA:0:8}" \
+        -o bin/3gpp-scanner-static \
+        ./cmd/3gpp-scanner
+  artifacts:
+    paths:
+      - go-3gpp-scanner/bin/3gpp-scanner-static
+    expire_in: 30 days
+  only:
+    - main
+    - merge_requests
