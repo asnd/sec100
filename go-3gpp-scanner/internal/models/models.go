@@ -40,11 +40,11 @@ type ScanConfig struct {
 
 // PingConfig holds configuration for ping operations
 type PingConfig struct {
-	Method      string // "icmp" or "tcp"
-	Timeout     time.Duration
-	Workers     int
-	TCPPorts    []int // Ports to check for TCP mode (default: 443, 4500)
-	Verbose     bool
+	Method   string // "icmp" or "tcp"
+	Timeout  time.Duration
+	Workers  int
+	TCPPorts []int // Ports to check for TCP mode (default: 443, 4500)
+	Verbose  bool
 }
 
 // PingResult represents the result of a ping operation
@@ -60,10 +60,10 @@ type PingResult struct {
 
 // Stats represents statistics about discovered FQDNs
 type Stats struct {
-	TotalFQDNs         int                 `json:"total_fqdns"`
-	MCCDistribution    map[string]int      `json:"mcc_distribution"`
-	SubdomainCounts    map[string]int      `json:"subdomain_counts"`
-	CountryCounts      map[string]int      `json:"country_counts"`
-	UniqueOperators    int                 `json:"unique_operators"`
-	TotalIPs           int                 `json:"total_ips"`
+	TotalFQDNs      int            `json:"total_fqdns"`
+	MCCDistribution map[string]int `json:"mcc_distribution"`
+	SubdomainCounts map[string]int `json:"subdomain_counts"`
+	CountryCounts   map[string]int `json:"country_counts"`
+	UniqueOperators int            `json:"unique_operators"`
+	TotalIPs        int            `json:"total_ips"`
 }

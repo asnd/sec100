@@ -19,10 +19,10 @@ const (
 
 // Fetcher handles fetching and caching of MCC-MNC data
 type Fetcher struct {
-	URL       string
-	CacheDir  string
-	CacheTTL  time.Duration
-	Verbose   bool
+	URL      string
+	CacheDir string
+	CacheTTL time.Duration
+	Verbose  bool
 }
 
 // NewFetcher creates a new MCC-MNC fetcher

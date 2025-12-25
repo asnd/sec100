@@ -13,16 +13,16 @@ import (
 
 // Analyzer handles statistical analysis of FQDN data
 type Analyzer struct {
-	mccPattern      *regexp.Regexp
-	mncPattern      *regexp.Regexp
+	mccPattern       *regexp.Regexp
+	mncPattern       *regexp.Regexp
 	subdomainPattern *regexp.Regexp
 }
 
 // NewAnalyzer creates a new analyzer
 func NewAnalyzer() *Analyzer {
 	return &Analyzer{
-		mccPattern:      regexp.MustCompile(`mcc(\d+)\.`),
-		mncPattern:      regexp.MustCompile(`mnc(\d+)\.`),
+		mccPattern:       regexp.MustCompile(`mcc(\d+)\.`),
+		mncPattern:       regexp.MustCompile(`mnc(\d+)\.`),
 		subdomainPattern: regexp.MustCompile(`^([^.]+)\.`),
 	}
 }

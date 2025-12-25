@@ -131,8 +131,8 @@ func (s *Scanner) resolveA(fqdn string) ([]string, error) {
 
 	// Try multiple DNS servers
 	servers := []string{
-		"8.8.8.8:53",   // Google DNS
-		"1.1.1.1:53",   // Cloudflare DNS
+		"8.8.8.8:53",        // Google DNS
+		"1.1.1.1:53",        // Cloudflare DNS
 		"208.67.222.222:53", // OpenDNS
 	}
 
