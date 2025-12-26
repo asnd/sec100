@@ -42,13 +42,13 @@ build-windows:
 # Build for macOS (x86_64)
 build-darwin:
 	@echo "Building for macOS x86_64..."
-	GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 \
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/3gpp-scanner
 
 # Build for macOS (ARM64)
 build-darwin-arm:
 	@echo "Building for macOS ARM64..."
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 \
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
 	go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/3gpp-scanner
 
 # Run tests
