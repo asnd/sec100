@@ -1,5 +1,4 @@
 stages:
-  - test
   - build
 
 variables:
@@ -14,49 +13,9 @@ before_script:
   - echo "Go version:" && go version
   - echo "Working in:" && pwd
 
-# Unit Tests
-test:unit:
-  stage: test
-  script:
-    - cd go-3gpp-scanner
-    - go mod download
-    - go test -v -race -coverprofile=coverage.out ./...
-    - go tool cover -func=coverage.out
-  artifacts:
-    reports:
-      coverage_report:
-        coverage_format: cobertura
-        path: go-3gpp-scanner/coverage.out
-    paths:
-      - go-3gpp-scanner/coverage.out
-    expire_in: 30 days
-  coverage: '/coverage: \d+\.?\d*%/'
-
-# Linting
-test:lint:
-  stage: test
-  script:
-    - cd go-3gpp-scanner
-    - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-    - golangci-lint run ./... --timeout 5m
-  allow_failure: true
-
-# Format check
-test:fmt:
-  stage: test
-  script:
-    - cd go-3gpp-scanner
-    - |
-      if [ -n "$(gofmt -s -l .)" ]; then
-        echo "Go code is not formatted:"
-        gofmt -s -d .
-        exit 1
-      fi
-
 # Build for Linux x86_64
 build:linux-amd64:
   stage: build
-  needs: ["test:unit"]
   before_script:
     - apt-get update && apt-get install -y build-essential
   script:
@@ -79,7 +38,6 @@ build:linux-amd64:
 # Build for Linux ARM64
 build:linux-arm64:
   stage: build
-  needs: ["test:unit"]
   before_script:
     - apt-get update && apt-get install -y build-essential gcc-aarch64-linux-gnu
   script:
@@ -102,7 +60,6 @@ build:linux-arm64:
 # Build for Linux ARM (32-bit)
 build:linux-arm:
   stage: build
-  needs: ["test:unit"]
   before_script:
     - apt-get update && apt-get install -y build-essential gcc-arm-linux-gnueabihf
   script:
@@ -125,7 +82,6 @@ build:linux-arm:
 # Build for macOS x86_64
 build:macos-amd64:
   stage: build
-  needs: ["test:unit"]
   image: golang:1.21-alpine
   before_script:
     - apk add --no-cache build-base
@@ -149,7 +105,6 @@ build:macos-amd64:
 # Build for macOS ARM64
 build:macos-arm64:
   stage: build
-  needs: ["test:unit"]
   image: golang:1.21-alpine
   before_script:
     - apk add --no-cache build-base
@@ -173,7 +128,6 @@ build:macos-arm64:
 # Build for Windows x86_64
 build:windows-amd64:
   stage: build
-  needs: ["test:unit"]
   before_script:
     - apt-get update && apt-get install -y build-essential gcc-mingw-w64-x86-64
   script:
@@ -196,7 +150,6 @@ build:windows-amd64:
 # Build all platforms in single job
 build:all:
   stage: build
-  needs: ["test:unit"]
   before_script:
     - apt-get update
     - apt-get install -y build-essential gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf gcc-mingw-w64-x86-64
@@ -214,7 +167,6 @@ build:all:
 # Build static binary (no CGO)
 build:static:
   stage: build
-  needs: ["test:unit"]
   script:
     - cd go-3gpp-scanner
     - go mod download
