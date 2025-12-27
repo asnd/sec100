@@ -46,14 +46,14 @@ def main():
     mcc_mnc_list = response.json()
 
     for item in mcc_mnc_list:
-     try:
-        mcc = int(item['mcc'])
-        mnc = int(item['mnc'])
-        operator = item['operator']
-        print(item['countryName'], " ", operator)
-        check_dns_records(mnc, mcc, operator, parent_domain, subdomains, cursor)
-     except Exception:
-       pass
+        try:
+            mcc = int(item['mcc'])
+            mnc = int(item['mnc'])
+            operator = item['operator']
+            print(item['countryName'], " ", operator)
+            check_dns_records(mnc, mcc, operator, parent_domain, subdomains, cursor)
+        except Exception:
+            pass
     # Commit the changes and close the connection
     conn.commit()
     conn.close()

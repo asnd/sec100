@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -585,7 +586,7 @@ func runFetchMCCMNC(cmd *cobra.Command, args []string) error {
 // Helper functions
 
 func exportScanResults(results []models.DNSResult, filePath string) error {
-	ext := strings.ToLower(filePath[len(filePath)-4:])
+	ext := strings.ToLower(filepath.Ext(filePath))
 
 	switch ext {
 	case ".json":
@@ -600,7 +601,7 @@ func exportScanResults(results []models.DNSResult, filePath string) error {
 }
 
 func exportPingResults(results []models.PingResult, filePath string) error {
-	ext := strings.ToLower(filePath[len(filePath)-4:])
+	ext := strings.ToLower(filepath.Ext(filePath))
 
 	switch ext {
 	case ".json":

@@ -24,7 +24,7 @@ def main():
     for item in mcc_mnc_list:
         mcc = int(item['mcc'])
         mnc = int(item['mnc'])
-        print(item['countryName'],"   ", item['operator'])
+        print(item['countryName'], " ", item['operator'])
         check_dns_records(mnc, mcc)
 
 if __name__ == "__main__":

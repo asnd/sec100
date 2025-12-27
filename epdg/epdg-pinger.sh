@@ -15,6 +15,6 @@ fi
 # Read FQDNs from the file and execute ping for each of them
 while IFS= read -r fqdn; do
     echo "Pinging $fqdn ..."
-    ping -c 1 -W 0.3 "$fqdn" | grep  epdg |grep bytes
+    ping -c 1 -W 0.3 "$fqdn" | grep -E 'epdg.*bytes|bytes.*epdg'
     #echo "--------------------------------------"
 done < "$1"
