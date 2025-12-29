@@ -13,6 +13,21 @@ A high-performance Go-based toolkit for scanning 3GPP network infrastructure.
 - **Database Integration**: SQLite support compatible with legacy Python tools.
 - **Multi-Platform**: Native binaries for Linux, Windows, and macOS.
 
+## Projects in this Repository
+
+This repository contains multiple projects:
+
+### 3GPP Security Scanner
+The main Go-based toolkit for scanning 3GPP network infrastructure (described above).
+
+### vROPS (Aria Operations) Inventory Generator
+The `vrops-inventory/` directory contains a Python project that interacts with vROPS (Aria Operations) REST APIs to generate Ansible-compatible inventory files. This tool retrieves information about VMware infrastructure components including:
+- VMware clusters
+- NSX-T edge nodes
+- NSX-T managers
+
+The generated inventory files can be used directly with Ansible for infrastructure automation tasks.
+
 ## Quick Start
 
 ### Build from Source
@@ -31,6 +46,7 @@ make build-all
 ## Repository Structure
 - `go-3gpp-scanner/`: Main Go implementation.
 - `epdg/`: Original Python research scripts and reference data.
+- `vrops-inventory/`: Python project for vROPS inventory generation.
 - `.gitlab-ci.yml`: Automated build pipeline for all platforms.
 
 ## CI/CD Pipeline

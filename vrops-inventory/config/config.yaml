@@ -1,0 +1,14 @@
+vrops:
+  hostname: "vrops.example.com"
+  username: "your-username"
+  password: "your-password"
+  port: 443
+  ssl_verify: false  # Set to true in production
+  api_version: "6.8"  # Adjust based on your vROPS version
+
+# Inventory options
+inventory:
+  output_file: "inventory.json"
+  include_clusters: true
+  include_nsx_t_edge: true
+  include_nsx_t_manager: true
