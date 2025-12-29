@@ -58,5 +58,12 @@ The `Makefile` supports targeted builds for all major platforms:
 - **Database**: `github.com/mattn/go-sqlite3` (Requires CGO for Linux/Windows)
 - **Network**: `golang.org/x/net`, `golang.org/x/time/rate`
 
----
-*Created by Gemini CLI Agent - December 2025*
+## Suggested Development Tools
+- **VSCode Extensions**:
+  - `golang.go`: Go language support.
+- **CLI Tools**:
+  - `go`: Go toolchain.
+  - `golangci-lint`: Linter.
+  - `cobra-cli`: For managing CLI commands.
+- **MCP Servers**:
+  - `filesystem`: For file access.
