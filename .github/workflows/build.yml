@@ -1,0 +1,199 @@
+# GitHub Actions for sec100 (3GPP Scanner)
+# Multi-platform Go builds
+
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  GO_VERSION: "1.24"
+  CGO_ENABLED: "1"
+
+jobs:
+  build-linux-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Build Linux AMD64
+        run: |
+          cd go-3gpp-scanner
+          go mod download
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \
+            go build \
+              -ldflags="-s -w -X main.version=${{ github.sha }}" \
+              -o bin/3gpp-scanner-linux-amd64 \
+              ./cmd/3gpp-scanner
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: go-3gpp-scanner/bin/3gpp-scanner-linux-amd64
+          retention-days: 30
+
+  build-linux-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-aarch64-linux-gnu
+      - name: Build Linux ARM64
+        run: |
+          cd go-3gpp-scanner
+          go mod download
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
+            go build \
+              -ldflags="-s -w -X main.version=${{ github.sha }}" \
+              -o bin/3gpp-scanner-linux-arm64 \
+              ./cmd/3gpp-scanner
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: go-3gpp-scanner/bin/3gpp-scanner-linux-arm64
+          retention-days: 30
+
+  build-linux-arm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-arm-linux-gnueabihf
+      - name: Build Linux ARM
+        run: |
+          cd go-3gpp-scanner
+          go mod download
+          GOOS=linux GOARCH=arm CGO_ENABLED=1 CC=arm-linux-gnueabihf-gcc \
+            go build \
+              -ldflags="-s -w -X main.version=${{ github.sha }}" \
+              -o bin/3gpp-scanner-linux-arm \
+              ./cmd/3gpp-scanner
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm
+          path: go-3gpp-scanner/bin/3gpp-scanner-linux-arm
+          retention-days: 30
+
+  build-macos-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build macOS AMD64
+        run: |
+          cd go-3gpp-scanner
+          go mod download
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 \
+            go build \
+              -ldflags="-s -w -X main.version=${{ github.sha }}" \
+              -o bin/3gpp-scanner-darwin-amd64 \
+              ./cmd/3gpp-scanner
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-amd64
+          path: go-3gpp-scanner/bin/3gpp-scanner-darwin-amd64
+          retention-days: 30
+
+  build-macos-arm64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build macOS ARM64
+        run: |
+          cd go-3gpp-scanner
+          go mod download
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+            go build \
+              -ldflags="-s -w -X main.version=${{ github.sha }}" \
+              -o bin/3gpp-scanner-darwin-arm64 \
+              ./cmd/3gpp-scanner
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: go-3gpp-scanner/bin/3gpp-scanner-darwin-arm64
+          retention-days: 30
+
+  build-windows-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Install cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y build-essential gcc-mingw-w64-x86-64
+      - name: Build Windows AMD64
+        run: |
+          cd go-3gpp-scanner
+          go mod download
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
+            go build \
+              -ldflags="-s -w -X main.version=${{ github.sha }}" \
+              -o bin/3gpp-scanner-windows-amd64.exe \
+              ./cmd/3gpp-scanner
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: go-3gpp-scanner/bin/3gpp-scanner-windows-amd64.exe
+          retention-days: 30
+
+  build-static:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Build static binary
+        run: |
+          cd go-3gpp-scanner
+          go mod download
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+            go build \
+              -ldflags="-s -w -X main.version=${{ github.sha }}" \
+              -o bin/3gpp-scanner-static \
+              ./cmd/3gpp-scanner
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: static
+          path: go-3gpp-scanner/bin/3gpp-scanner-static
+          retention-days: 30
