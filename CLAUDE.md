@@ -20,6 +20,19 @@ This is a security research toolkit for discovering and analyzing ePDG (evolved 
   - Same functionality with additional features (dual ping modes, flexible export)
   - Fully compatible with Python version (same database schema)
 
+- `telegram-bot/` - **NEW: Telegram Bot for 3GPP Network Queries**
+  - Interactive Telegram bot for querying 3GPP infrastructure
+  - Supports country search, MCC/MNC lookup, MSISDN parsing, operator search
+  - Real-time IP resolution with concurrent DNS workers
+  - Rate limiting and query logging
+  - Uses aiosqlite for async database operations
+
+- `mcp-server/` - **MCP Server for Claude Desktop Integration**
+  - Model Context Protocol server for 3GPP database queries
+  - Provides tools for querying operators by MNC, MCC, or operator name
+  - Real-time IP resolution integrated into responses
+  - Designed for use with Claude Desktop app
+
 ## Key Tools
 
 ### DNS Discovery Scripts
@@ -251,3 +264,131 @@ Both toolkits can be used interchangeably:
 - Go binary can read databases created by Python scripts
 - Same FQDN format and output structure
 - Use whichever tool fits your needs!
+
+---
+
+## Telegram Bot (NEW)
+
+### Overview
+
+The `telegram-bot/` directory contains a production-ready Telegram bot that provides interactive queries of 3GPP infrastructure. Users can search by country name, MCC/MNC codes, phone numbers (MSISDN), or operator names.
+
+**Key Features:**
+- 🌍 **Country Search** - Fuzzy matching on country names
+- 📡 **MCC/MNC Queries** - Direct lookup by mobile codes
+- 📱 **MSISDN Parsing** - Extract operator info from phone numbers using Google's libphonenumber
+- 🔍 **Operator Search** - Find specific operators with suggestions
+- ⚡ **Real-time IP Resolution** - Concurrent DNS resolution (10 workers by default)
+- ⏱️ **Rate Limiting** - 10 queries/min, 50/hour per user
+- 📊 **Query Logging** - Track usage and analytics
+
+### Quick Start
+
+```bash
+# 1. Install dependencies
+cd telegram-bot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Run database migration (adds countries and phone_codes tables)
+cd migrations
+python3 001_add_countries.py
+cd ..
+
+# 3. Configure bot
+cp .env.example .env
+# Edit .env and set TELEGRAM_BOT_TOKEN (get from @BotFather)
+
+# 4. Run the bot
+python3 main.py
+```
+
+### Bot Commands
+
+| Command | Usage | Example |
+|---------|-------|---------|
+| `/start` | Welcome message | `/start` |
+| `/help` | Command reference | `/help` |
+| `/country` | Search by country | `/country Austria` |
+| `/mcc` | Query by MCC | `/mcc 232` |
+| `/mnc` | Query by MNC+MCC | `/mnc 1 232` |
+| `/phone` | Parse phone number | `/phone +43-660-1234567` |
+| `/operator` | Search operator | `/operator Vodafone` |
+
+### Architecture
+
+The bot uses:
+- **python-telegram-bot** for Telegram API integration
+- **aiosqlite** for async database queries
+- **phonenumbers** (libphonenumber) for phone parsing
+- **Concurrent DNS resolution** (ThreadPoolExecutor) from MCP server
+
+Key components:
+- `handlers/` - Command handlers for each bot command
+- `services/` - Business logic (database, DNS, parsing, formatting)
+- `migrations/` - Database schema upgrades
+- `utils/` - Logging and utilities
+
+### Database Schema Changes
+
+The bot adds 3 new tables to the SQLite database:
+
+1. **countries** - Maps country names/codes to MCCs (255 entries)
+2. **phone_country_codes** - Maps E.164 phone codes to countries (182 entries)
+3. **query_log** - Tracks bot usage for analytics
+
+These tables are created by running the migration script.
+
+### Configuration
+
+All settings in `.env` file:
+- `TELEGRAM_BOT_TOKEN` - From @BotFather (required)
+- `ADMIN_USER_IDS` - Comma-separated admin IDs (bypass rate limits)
+- `DB_PATH` - Path to database.db (default: `../go-3gpp-scanner/bin/database.db`)
+- `MAX_QUERIES_PER_MINUTE` / `MAX_QUERIES_PER_HOUR` - Rate limits
+- `DNS_RESOLUTION_TIMEOUT` / `DNS_CONCURRENT_WORKERS` - DNS settings
+
+### Deployment
+
+**Systemd service:**
+```bash
+sudo cp telegram-bot/telegram-bot.service /etc/systemd/system/
+sudo systemctl enable telegram-bot
+sudo systemctl start telegram-bot
+```
+
+**Docker:**
+```bash
+cd telegram-bot
+docker build -t 3gpp-telegram-bot .
+docker run -d --env-file .env 3gpp-telegram-bot
+```
+
+### Full Documentation
+
+See `telegram-bot/README.md` for:
+- Complete installation guide
+- Configuration reference
+- Troubleshooting
+- Security considerations
+- Development guide
+
+---
+
+## MCP Server
+
+The `mcp-server/` directory contains a Model Context Protocol server for integrating 3GPP database queries into Claude Desktop.
+
+**Features:**
+- Query operators by MNC, MCC, or operator name
+- Real-time IP resolution
+- Formatted responses optimized for Claude
+
+**Usage:**
+```bash
+cd mcp-server
+python3 main.py
+```
+
+See `mcp-server/README.md` for full documentation.

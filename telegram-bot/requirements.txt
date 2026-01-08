@@ -1,0 +1,17 @@
+# Telegram Bot Framework
+python-telegram-bot==21.0
+
+# Database
+aiosqlite==0.19.0
+
+# Phone Number Parsing
+phonenumbers==8.13.27
+
+# DNS Resolution (already used by other scripts)
+dnspython==2.4.2
+
+# Configuration
+python-dotenv==1.0.0
+
+# HTTP (for potential MCC-MNC list updates)
+requests==2.31.0
