@@ -83,6 +83,7 @@ api_keys.txt
 # Build artifacts
 /go-3gpp-scanner/bin/
 /go-3gpp-scanner/*.exe
+/go-3gpp-scanner/3gpp-scanner
 /go-3gpp-scanner/coverage.html
 /go-3gpp-scanner/coverage.out
 
