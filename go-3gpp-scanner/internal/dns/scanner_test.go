@@ -153,3 +153,36 @@ func TestFormatIPCount(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveFQDNSkipsInvalidMCC verifies that entries with invalid MCC/MNC
+// values are silently skipped (resolveFQDN returns nil) rather than producing
+// malformed FQDNs from strconv.Atoi errors.
+func TestResolveFQDNSkipsInvalidMCC(t *testing.T) {
+	config := &models.ScanConfig{
+		ParentDomain: "pub.3gppnetwork.org",
+		Subdomains:   []string{"ims"},
+		QueryDelay:   100 * time.Millisecond,
+		Concurrency:  1,
+		Verbose:      false,
+	}
+
+	scanner := NewScanner(config)
+
+	invalidEntries := []models.MCCMNCEntry{
+		{MCC: "",     MNC: "001", Operator: "Empty MCC"},
+		{MCC: "abc",  MNC: "001", Operator: "Non-numeric MCC"},
+		{MCC: "310",  MNC: "",    Operator: "Empty MNC"},
+		{MCC: "310",  MNC: "xyz", Operator: "Non-numeric MNC"},
+		{MCC: "0",    MNC: "001", Operator: "MCC zero"},
+		{MCC: "1000", MNC: "001", Operator: "MCC out of range"},
+		{MCC: "310",  MNC: "-1",  Operator: "MNC negative"},
+		{MCC: "310",  MNC: "1000",Operator: "MNC out of range"},
+	}
+
+	for _, entry := range invalidEntries {
+		result := scanner.resolveFQDN(entry, "ims")
+		if result != nil {
+			t.Errorf("resolveFQDN with invalid entry %+v returned non-nil result: %+v", entry, result)
+		}
+	}
+}
