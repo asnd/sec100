@@ -276,6 +276,10 @@ cli_help:
     - python3 $SCRIPTS_DIR/3gpppub-naptr-discovery.py --help
     - python3 $SCRIPTS_DIR/3gpppub-diff.py --help
     - python3 $SCRIPTS_DIR/3gpppub-grx-access.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-cli.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-cli.py stats --help
+    - python3 $SCRIPTS_DIR/3gpppub-cli.py score --help
+    - python3 $SCRIPTS_DIR/3gpppub-cli.py export --help
   rules:
     - changes:
         - epdg/*.py
@@ -355,3 +359,66 @@ EOF
   rules:
     - changes:
         - epdg/*.py
+
+cli_smoke:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet -r $SCRIPTS_DIR/requirements.txt
+  script:
+    - python3 - << 'EOF'
+import sqlite3, sys, os, subprocess, tempfile
+
+# Build a minimal test database
+with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+    db_path = f.name
+
+conn = sqlite3.connect(db_path)
+conn.executescript("""
+CREATE TABLE operators (
+    id INTEGER PRIMARY KEY, mnc INTEGER, mcc INTEGER,
+    operator TEXT, country_name TEXT, country_code TEXT, last_scanned TIMESTAMP,
+    UNIQUE(mnc, mcc)
+);
+CREATE TABLE available_fqdns (
+    id INTEGER PRIMARY KEY, mnc INTEGER, mcc INTEGER,
+    operator TEXT, country_name TEXT,
+    fqdn TEXT, record_type TEXT DEFAULT 'A',
+    service TEXT, resolved_ips TEXT,
+    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(fqdn, record_type)
+);
+INSERT INTO operators VALUES (1,260,310,'T-Mobile US','United States','US','2024-01-01');
+INSERT INTO available_fqdns VALUES
+  (1,260,310,'T-Mobile US','United States','epdg.epc.mnc260.mcc310.pub.3gppnetwork.org','A','epdg.epc','1.2.3.4',datetime('now'),datetime('now')),
+  (2,260,310,'T-Mobile US','United States','ims.mnc260.mcc310.pub.3gppnetwork.org','A','ims','5.6.7.8',datetime('now'),datetime('now'));
+""")
+conn.commit()
+conn.close()
+
+os.environ['DB_PATH'] = db_path
+errors = 0
+for cmd in [
+    ['python3', 'epdg/3gpppub-cli.py', '--db', db_path, 'stats'],
+    ['python3', 'epdg/3gpppub-cli.py', '--db', db_path, 'countries'],
+    ['python3', 'epdg/3gpppub-cli.py', '--db', db_path, 'services'],
+    ['python3', 'epdg/3gpppub-cli.py', '--db', db_path, 'score', '--top', '5'],
+    ['python3', 'epdg/3gpppub-cli.py', '--db', db_path, 'search', 'T-Mobile'],
+    ['python3', 'epdg/3gpppub-cli.py', '--db', db_path, 'operator', '--mcc', '310', '--mnc', '260'],
+    ['python3', 'epdg/3gpppub-cli.py', '--db', db_path, 'export', '--format', 'json'],
+]:
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f'FAIL {cmd[3:]}: {r.stderr.strip()}')
+        errors += 1
+    else:
+        print(f'OK   {cmd[3:]}')
+
+os.unlink(db_path)
+sys.exit(errors)
+EOF
+  rules:
+    - changes:
+        - epdg/*.py
+        - epdg/requirements.txt

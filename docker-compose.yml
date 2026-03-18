@@ -1,0 +1,31 @@
+services:
+
+  # ── CLI mode (default) ────────────────────────────────────────────────────
+  # Usage:  docker compose run --rm cli stats
+  #         docker compose run --rm cli score --top 10
+  #         docker compose run --rm cli search Vodafone
+  cli:
+    build: .
+    image: 3gpp-explorer
+    environment:
+      ENABLE_WEBUI: "0"
+      DB_PATH: /data/database.db
+    volumes:
+      - ${DB_FILE:-./epdg/database.db}:/data/database.db:ro
+    profiles: [cli]
+
+  # ── Web UI mode ───────────────────────────────────────────────────────────
+  # Usage:  docker compose --profile webui up
+  #         then open http://localhost:8501
+  webui:
+    build: .
+    image: 3gpp-explorer
+    environment:
+      ENABLE_WEBUI: "1"
+      DB_PATH: /data/database.db
+    volumes:
+      - ${DB_FILE:-./epdg/database.db}:/data/database.db:ro
+    ports:
+      - "8501:8501"
+    profiles: [webui]
+    restart: unless-stopped

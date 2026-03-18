@@ -12,9 +12,11 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-DB_PATH = Path(__file__).parent / "database.db"
 sys.path.insert(0, str(Path(__file__).parent))
 from subdomains import SERVICE_COLORS, SCORE_WEIGHTS, fqdn_to_service, sql_case_when
+from db_queries import open_db, query_fqdns, query_operators, compute_scores
+
+DB_PATH = Path(__file__).parent / "database.db"
 
 st.set_page_config(
     page_title="3GPP Public Domain Explorer",
@@ -25,38 +27,21 @@ st.set_page_config(
 
 @st.cache_resource
 def get_conn():
-    if not DB_PATH.exists():
-        st.error(f"Database not found at {DB_PATH}. Run 3gpppub-dns-database-population.py first.")
+    try:
+        return open_db(DB_PATH)
+    except FileNotFoundError as e:
+        st.error(str(e))
         st.stop()
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 @st.cache_data(ttl=300)
 def load_fqdns() -> pd.DataFrame:
-    conn = get_conn()
-    df = pd.read_sql_query(
-        f"""
-        SELECT f.mnc, f.mcc, f.operator, f.country_name,
-               f.fqdn, f.record_type, f.resolved_ips,
-               f.first_seen, f.last_seen,
-               COALESCE(f.service, ({sql_case_when('f.fqdn')})) AS service
-        FROM available_fqdns f
-        ORDER BY f.country_name, f.operator
-        """,
-        conn,
-    )
-    return df
+    return query_fqdns(get_conn())
 
 
 @st.cache_data(ttl=300)
 def load_operators() -> pd.DataFrame:
-    conn = get_conn()
-    return pd.read_sql_query(
-        "SELECT mnc, mcc, operator, country_name, country_code, last_scanned FROM operators ORDER BY country_name",
-        conn,
-    )
+    return query_operators(get_conn())
 
 
 service_label = fqdn_to_service  # alias — shared impl in subdomains.py
@@ -329,59 +314,7 @@ with tab_score:
         "Run `3gpppub-5g-discovery.py` to unlock 5G SA scoring."
     )
 
-    # Per-operator service pivot
-    score_pivot = (
-        df_all.groupby(["mnc", "mcc", "operator", "country_name", "service"])
-        .size()
-        .reset_index(name="count")
-        .pivot_table(
-            index=["mnc", "mcc", "operator", "country_name"],
-            columns="service",
-            values="count",
-            fill_value=0,
-        )
-        .reset_index()
-    )
-
-    # Check for 5G SA data
-    conn_score = get_conn()
-    has_5g_table = conn_score.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='fiveg_fqdns'"
-    ).fetchone()
-
-    if has_5g_table:
-        fiveg_ops = set(
-            conn_score.execute(
-                "SELECT DISTINCT mcc || '-' || mnc FROM fiveg_fqdns"
-            ).fetchall()
-        )
-        score_pivot["_5g_key"] = (
-            score_pivot["mcc"].astype(str) + "-" + score_pivot["mnc"].astype(str)
-        )
-        score_pivot["5g_sa"] = score_pivot["_5g_key"].isin(
-            {r[0] for r in fiveg_ops}
-        ).astype(int)
-    else:
-        score_pivot["5g_sa"] = 0
-
-    # Compute score
-    def compute_score(row):
-        score = 0
-        breakdown = []
-        for svc, (label, pts, icon) in SCORE_WEIGHTS.items():
-            if svc in row and row[svc] > 0:
-                score += pts
-                breakdown.append(f"{icon} {label} +{pts}")
-        if row.get("5g_sa", 0):
-            score += 20
-            breakdown.append("🚀 5G SA (NRF/SEPP) +20")
-        return score, " | ".join(breakdown)
-
-    score_pivot[["score", "capabilities"]] = score_pivot.apply(
-        lambda r: pd.Series(compute_score(r)), axis=1
-    )
-    score_pivot = score_pivot.sort_values("score", ascending=False).reset_index(drop=True)
-    score_pivot["rank"] = score_pivot.index + 1
+    score_pivot = compute_scores(get_conn(), df_all)
 
     # Filter
     score_countries = sorted(score_pivot["country_name"].dropna().unique())
