@@ -8,36 +8,17 @@ import argparse
 import sys
 import time
 
+import sys
+from pathlib import Path
+
 import dns.resolver
 import requests
 from dns.resolver import NXDOMAIN, NoAnswer, Timeout
 
+sys.path.insert(0, str(Path(__file__).parent))
+from subdomains import SUBDOMAINS
+
 PARENT_DOMAIN = "pub.3gppnetwork.org"
-SUBDOMAINS = [
-    # VoWiFi / ePDG
-    "epdg.epc",
-    "ss.epdg.epc",       # ePDG steering/load-balancing (T-Mobile US)
-    "sos.epdg.epc",      # Emergency ePDG
-    "vowifi",             # Non-standard VoWiFi alias
-    # 5G non-3GPP access
-    "n3iwf.5gc",          # N3IWF — replaces ePDG in 5GS (3GPP TS 23.502)
-    # IMS / VoLTE
-    "ims",
-    "pcscf.ims",          # P-CSCF discovery (3GPP TS 24.229)
-    "mmtel.ims",          # MMTel supplementary services (3GPP TS 24.173)
-    "xcap.ims",           # XCAP config (3GPP TS 24.623)
-    "ut.ims",             # Ut interface (3GPP TS 24.623)
-    # Emergency
-    "sos",
-    "sos.ims",
-    "aes",                # Auth/Emergency services (T-Mobile MX)
-    # Other
-    "bsf",                # Bootstrapping Server Function (3GPP TS 33.220)
-    "gan",                # GAN/UMA (3GPP TS 44.318)
-    "rcs",                # Rich Communication Services (GSMA IR.94)
-    "subs",               # Subscription/provisioning (Canadian MNOs)
-    "cota-sdk",           # COTA Over-The-Air config (T-Mobile MX)
-]
 MCC_MNC_URL = "https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json"
 
 

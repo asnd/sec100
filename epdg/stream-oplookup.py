@@ -5,6 +5,7 @@ Explore and analyse discovered DNS records from the database.
 """
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -12,33 +13,8 @@ import plotly.express as px
 import streamlit as st
 
 DB_PATH = Path(__file__).parent / "database.db"
-
-SERVICE_COLORS = {
-    # VoWiFi / ePDG
-    "epdg.epc":     "#1f77b4",
-    "ss.epdg.epc":  "#aec7e8",
-    "sos.epdg.epc": "#17becf",
-    "vowifi":        "#9edae5",
-    # 5G non-3GPP
-    "n3iwf.5gc":    "#bcbd22",
-    # IMS / VoLTE
-    "ims":          "#ff7f0e",
-    "pcscf.ims":    "#ffbb78",
-    "mmtel.ims":    "#ff9896",
-    "xcap.ims":     "#d62728",
-    "ut.ims":       "#e377c2",
-    # Emergency
-    "sos":          "#e41a1c",
-    "sos.ims":      "#f7b6d2",
-    "aes":          "#c49c94",
-    # Other
-    "bsf":          "#2ca02c",
-    "gan":          "#9467bd",
-    "rcs":          "#8c564b",
-    "subs":         "#7f7f7f",
-    "cota-sdk":     "#c5b0d5",
-    "other":        "#c7c7c7",
-}
+sys.path.insert(0, str(Path(__file__).parent))
+from subdomains import SERVICE_COLORS, SCORE_WEIGHTS, fqdn_to_service, sql_case_when
 
 st.set_page_config(
     page_title="3GPP Public Domain Explorer",
@@ -61,31 +37,11 @@ def get_conn():
 def load_fqdns() -> pd.DataFrame:
     conn = get_conn()
     df = pd.read_sql_query(
-        """
+        f"""
         SELECT f.mnc, f.mcc, f.operator, f.country_name,
                f.fqdn, f.record_type, f.resolved_ips,
                f.first_seen, f.last_seen,
-               CASE
-                 WHEN f.fqdn LIKE 'ss.epdg.epc%'    THEN 'ss.epdg.epc'
-                 WHEN f.fqdn LIKE 'sos.epdg.epc%'   THEN 'sos.epdg.epc'
-                 WHEN f.fqdn LIKE 'epdg.epc%'        THEN 'epdg.epc'
-                 WHEN f.fqdn LIKE 'n3iwf.5gc%'       THEN 'n3iwf.5gc'
-                 WHEN f.fqdn LIKE 'vowifi%'           THEN 'vowifi'
-                 WHEN f.fqdn LIKE 'pcscf.ims%'        THEN 'pcscf.ims'
-                 WHEN f.fqdn LIKE 'mmtel.ims%'        THEN 'mmtel.ims'
-                 WHEN f.fqdn LIKE 'xcap.ims%'         THEN 'xcap.ims'
-                 WHEN f.fqdn LIKE 'ut.ims%'           THEN 'ut.ims'
-                 WHEN f.fqdn LIKE 'sos.ims%'          THEN 'sos.ims'
-                 WHEN f.fqdn LIKE 'ims%'              THEN 'ims'
-                 WHEN f.fqdn LIKE 'bsf%'              THEN 'bsf'
-                 WHEN f.fqdn LIKE 'gan%'              THEN 'gan'
-                 WHEN f.fqdn LIKE 'sos%'              THEN 'sos'
-                 WHEN f.fqdn LIKE 'aes%'              THEN 'aes'
-                 WHEN f.fqdn LIKE 'rcs%'              THEN 'rcs'
-                 WHEN f.fqdn LIKE 'subs%'             THEN 'subs'
-                 WHEN f.fqdn LIKE 'cota-sdk%'         THEN 'cota-sdk'
-                 ELSE 'other'
-               END AS service
+               COALESCE(f.service, ({sql_case_when('f.fqdn')})) AS service
         FROM available_fqdns f
         ORDER BY f.country_name, f.operator
         """,
@@ -103,17 +59,7 @@ def load_operators() -> pd.DataFrame:
     )
 
 
-def service_label(fqdn: str) -> str:
-    for svc in (
-        "ss.epdg.epc", "sos.epdg.epc", "epdg.epc",
-        "n3iwf.5gc", "vowifi",
-        "pcscf.ims", "mmtel.ims", "xcap.ims", "ut.ims", "sos.ims", "ims",
-        "sos", "aes",
-        "bsf", "gan", "rcs", "subs", "cota-sdk",
-    ):
-        if fqdn.startswith(svc):
-            return svc
-    return "other"
+service_label = fqdn_to_service  # alias — shared impl in subdomains.py
 
 
 # ── Sidebar filters ────────────────────────────────────────────────────────────
@@ -383,18 +329,6 @@ with tab_score:
         "Run `3gpppub-5g-discovery.py` to unlock 5G SA scoring."
     )
 
-    SCORE_WEIGHTS = {
-        "epdg.epc":    ("VoWiFi (ePDG)",           20, "📶"),
-        "n3iwf.5gc":   ("5G VoWiFi (N3IWF)",        15, "🛜"),
-        "ims":         ("VoLTE (IMS)",               15, "📞"),
-        "pcscf.ims":   ("P-CSCF discovery",          10, "🔀"),
-        "xcap.ims":    ("Device Mgmt (XCAP)",        10, "⚙️"),
-        "bsf":         ("5G Auth (BSF)",             10, "🔐"),
-        "rcs":         ("RCS messaging",             10, "💬"),
-        "sos":         ("Emergency SOS",              5, "🆘"),
-        "gan":         ("UMA/GAN (WiFi Calling)",     5, "📡"),
-    }
-
     # Per-operator service pivot
     score_pivot = (
         df_all.groupby(["mnc", "mcc", "operator", "country_name", "service"])
@@ -537,30 +471,10 @@ with tab_asn:
         )
     else:
         asn_df = pd.read_sql_query(
-            """
+            f"""
             SELECT operator, country_name, fqdn, record_type, resolved_ips,
                    asn, asn_org, hosting_provider, ip_country,
-                   CASE
-                     WHEN fqdn LIKE 'ss.epdg.epc%'    THEN 'ss.epdg.epc'
-                     WHEN fqdn LIKE 'sos.epdg.epc%'   THEN 'sos.epdg.epc'
-                     WHEN fqdn LIKE 'epdg.epc%'        THEN 'epdg.epc'
-                     WHEN fqdn LIKE 'n3iwf.5gc%'       THEN 'n3iwf.5gc'
-                     WHEN fqdn LIKE 'vowifi%'           THEN 'vowifi'
-                     WHEN fqdn LIKE 'pcscf.ims%'        THEN 'pcscf.ims'
-                     WHEN fqdn LIKE 'mmtel.ims%'        THEN 'mmtel.ims'
-                     WHEN fqdn LIKE 'xcap.ims%'         THEN 'xcap.ims'
-                     WHEN fqdn LIKE 'ut.ims%'           THEN 'ut.ims'
-                     WHEN fqdn LIKE 'sos.ims%'          THEN 'sos.ims'
-                     WHEN fqdn LIKE 'ims%'              THEN 'ims'
-                     WHEN fqdn LIKE 'bsf%'              THEN 'bsf'
-                     WHEN fqdn LIKE 'gan%'              THEN 'gan'
-                     WHEN fqdn LIKE 'sos%'              THEN 'sos'
-                     WHEN fqdn LIKE 'aes%'              THEN 'aes'
-                     WHEN fqdn LIKE 'rcs%'              THEN 'rcs'
-                     WHEN fqdn LIKE 'subs%'             THEN 'subs'
-                     WHEN fqdn LIKE 'cota-sdk%'         THEN 'cota-sdk'
-                     ELSE 'other'
-                   END AS service
+                   COALESCE(service, ({sql_case_when('fqdn')})) AS service
             FROM available_fqdns
             WHERE asn IS NOT NULL
             """,

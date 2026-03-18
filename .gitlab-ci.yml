@@ -321,44 +321,34 @@ subdomain_consistency:
   before_script: []
   script:
     - python3 - << 'EOF'
-import ast, sys
+import sys, importlib.util
 
-EXPECTED = {
-    "epdg.epc", "ss.epdg.epc", "sos.epdg.epc", "vowifi",
-    "n3iwf.5gc",
-    "ims", "pcscf.ims", "mmtel.ims", "xcap.ims", "ut.ims",
-    "sos", "sos.ims", "aes",
-    "bsf", "gan", "rcs", "subs", "cota-sdk",
-}
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod  = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
-def extract_subdomains(path):
-    with open(path) as fh:
-        tree = ast.parse(fh.read())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for t in node.targets:
-                if isinstance(t, ast.Name) and t.id == 'SUBDOMAINS':
-                    return {elt.s for elt in node.value.elts
-                            if isinstance(elt, ast.Constant)}
-    return None
+# subdomains.py is the master — every file must import from it
+master = load_module('subdomains', 'epdg/subdomains.py')
+EXPECTED = set(master.SUBDOMAINS)
+print(f'Master subdomains.py: {len(EXPECTED)} entries')
 
+# Verify SCORE_WEIGHTS only references subdomains that exist in EXPECTED
+bad_weights = set(master.SCORE_WEIGHTS) - EXPECTED
+if bad_weights:
+    print(f'FAIL: SCORE_WEIGHTS references unknown subdomains: {bad_weights}')
+    sys.exit(1)
+print(f'SCORE_WEIGHTS OK: {len(master.SCORE_WEIGHTS)} scoring entries')
+
+# Verify sql_case_when() covers all subdomains
+case_when = master.sql_case_when()
 errors = 0
-for path in [
-    'epdg/3gpppub-dns-database-population.py',
-    'epdg/3gpppub-dns-checker.py',
-]:
-    found = extract_subdomains(path)
-    if found is None:
-        print(f'FAIL {path}: SUBDOMAINS not found')
+for s in EXPECTED:
+    if s not in case_when:
+        print(f'FAIL: {s} missing from sql_case_when() output')
         errors += 1
-        continue
-    missing = EXPECTED - found
-    extra   = found - EXPECTED
-    if missing or extra:
-        print(f'FAIL {path}: missing={missing} extra={extra}')
-        errors += 1
-    else:
-        print(f'OK   {path}: {len(found)} subdomains')
+print(f'sql_case_when OK: all {len(EXPECTED)} subdomains present')
 
 sys.exit(errors)
 EOF

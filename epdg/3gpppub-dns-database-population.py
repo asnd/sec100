@@ -49,6 +49,8 @@ import dns.resolver
 import requests
 from dns.resolver import NXDOMAIN, NoAnswer, Timeout
 
+from subdomains import SUBDOMAINS, fqdn_to_service
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -60,34 +62,6 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 PARENT_DOMAIN = "pub.3gppnetwork.org"
-
-# Complete subdomain list — all known pub.3gppnetwork.org service labels
-SUBDOMAINS = [
-    # VoWiFi / ePDG
-    "epdg.epc",
-    "ss.epdg.epc",       # ePDG steering/load-balancing (T-Mobile US)
-    "sos.epdg.epc",      # Emergency ePDG
-    "vowifi",             # Non-standard VoWiFi alias
-    # 5G non-3GPP access
-    "n3iwf.5gc",          # N3IWF — replaces ePDG in 5GS (3GPP TS 23.502)
-    # IMS / VoLTE
-    "ims",
-    "pcscf.ims",          # P-CSCF discovery (3GPP TS 24.229)
-    "mmtel.ims",          # MMTel supplementary services (3GPP TS 24.173)
-    "xcap.ims",           # XCAP config (3GPP TS 24.623)
-    "ut.ims",             # Ut interface (3GPP TS 24.623)
-    # Emergency
-    "sos",
-    "sos.ims",
-    "aes",                # Auth/Emergency services (T-Mobile MX)
-    # Other
-    "bsf",                # Bootstrapping Server Function (3GPP TS 33.220)
-    "gan",                # GAN/UMA (3GPP TS 44.318)
-    "rcs",                # Rich Communication Services (GSMA IR.94)
-    "subs",               # Subscription/provisioning (Canadian MNOs)
-    "cota-sdk",           # COTA Over-The-Air config (T-Mobile MX)
-]
-
 MCC_MNC_URL = "https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json"
 
 SCHEMA = """
@@ -110,6 +84,7 @@ CREATE TABLE IF NOT EXISTS available_fqdns (
     country_name TEXT,
     fqdn         TEXT    NOT NULL,
     record_type  TEXT    NOT NULL DEFAULT 'A',
+    service      TEXT,
     resolved_ips TEXT,
     first_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -126,6 +101,13 @@ def init_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # Migrate existing DBs that pre-date the service column
+    try:
+        conn.execute("ALTER TABLE available_fqdns ADD COLUMN service TEXT")
+        conn.commit()
+        log.info("Migrated available_fqdns: added service column")
+    except sqlite3.OperationalError:
+        pass  # Column already present
     conn.commit()
     return conn
 
@@ -199,10 +181,11 @@ def save_result(conn: sqlite3.Connection, result: dict) -> None:
             conn.execute(
                 """
                 INSERT INTO available_fqdns
-                    (mnc, mcc, operator, country_name, fqdn, record_type, resolved_ips, first_seen, last_seen)
+                    (mnc, mcc, operator, country_name, fqdn, record_type, service, resolved_ips, first_seen, last_seen)
                 VALUES
-                    (:mnc, :mcc, :operator, :country_name, :fqdn, :record_type, :resolved_ips, :now, :now)
+                    (:mnc, :mcc, :operator, :country_name, :fqdn, :record_type, :service, :resolved_ips, :now, :now)
                 ON CONFLICT(fqdn, record_type) DO UPDATE SET
+                    service      = excluded.service,
                     resolved_ips = excluded.resolved_ips,
                     last_seen    = excluded.last_seen
                 """,
@@ -213,6 +196,7 @@ def save_result(conn: sqlite3.Connection, result: dict) -> None:
                     "country_name": result["country_name"],
                     "fqdn":         fqdn_entry["fqdn"],
                     "record_type":  fqdn_entry["record_type"],
+                    "service":      fqdn_to_service(fqdn_entry["fqdn"]),
                     "resolved_ips": fqdn_entry["resolved_ips"],
                     "now":          now,
                 },
@@ -248,32 +232,11 @@ def print_summary(conn: sqlite3.Connection) -> None:
     for row in rows:
         print(f"{row['country_name']:<35} {row['operators']:>9} {row['total_fqdns']:>7}")
 
-    # Per-service breakdown
+    # Per-service breakdown — uses stored service column, no CASE WHEN needed
     svc_rows = conn.execute(
         """
-        SELECT
-            CASE
-              WHEN fqdn LIKE 'ss.epdg.epc%'    THEN 'ss.epdg.epc'
-              WHEN fqdn LIKE 'sos.epdg.epc%'   THEN 'sos.epdg.epc'
-              WHEN fqdn LIKE 'epdg.epc%'        THEN 'epdg.epc'
-              WHEN fqdn LIKE 'n3iwf.5gc%'       THEN 'n3iwf.5gc'
-              WHEN fqdn LIKE 'vowifi%'           THEN 'vowifi'
-              WHEN fqdn LIKE 'pcscf.ims%'        THEN 'pcscf.ims'
-              WHEN fqdn LIKE 'mmtel.ims%'        THEN 'mmtel.ims'
-              WHEN fqdn LIKE 'xcap.ims%'         THEN 'xcap.ims'
-              WHEN fqdn LIKE 'sos.ims%'          THEN 'sos.ims'
-              WHEN fqdn LIKE 'ut.ims%'           THEN 'ut.ims'
-              WHEN fqdn LIKE 'ims%'              THEN 'ims'
-              WHEN fqdn LIKE 'bsf%'              THEN 'bsf'
-              WHEN fqdn LIKE 'gan%'              THEN 'gan'
-              WHEN fqdn LIKE 'sos%'              THEN 'sos'
-              WHEN fqdn LIKE 'aes%'              THEN 'aes'
-              WHEN fqdn LIKE 'rcs%'              THEN 'rcs'
-              WHEN fqdn LIKE 'subs%'             THEN 'subs'
-              WHEN fqdn LIKE 'cota-sdk%'         THEN 'cota-sdk'
-              ELSE 'other'
-            END AS service,
-            COUNT(DISTINCT mcc || '-' || mnc) AS operators
+        SELECT COALESCE(service, 'other') AS service,
+               COUNT(DISTINCT mcc || '-' || mnc) AS operators
         FROM available_fqdns
         GROUP BY service
         ORDER BY operators DESC
