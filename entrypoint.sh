@@ -15,6 +15,15 @@ set -e
 DB_PATH="${DB_PATH:-/data/database.db}"
 export DB_PATH
 
+# Catch the common Docker mount mistake: host file missing → Docker creates a directory
+if [ -d "$DB_PATH" ]; then
+    echo "Error: $DB_PATH is a directory, not a database file." >&2
+    echo "The database file does not exist on the host — Docker created an empty directory." >&2
+    echo "Run 3gpppub-dns-database-population.py first, then mount the file:" >&2
+    echo "  docker run --rm -v \$(pwd)/epdg/database.db:/data/database.db 3gpp-explorer stats" >&2
+    exit 1
+fi
+
 if [ "${ENABLE_WEBUI:-0}" = "1" ]; then
     echo "Starting Streamlit web UI on :8501 ..."
     exec streamlit run /app/epdg/stream-oplookup.py \

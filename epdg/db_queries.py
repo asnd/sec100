@@ -17,7 +17,14 @@ DEFAULT_DB = Path(__file__).parent / "database.db"
 
 def open_db(db_path: str | Path | None = None) -> sqlite3.Connection:
     path = Path(db_path) if db_path else DEFAULT_DB
-    if not path.exists():
+    if path.is_dir():
+        raise FileNotFoundError(
+            f"{path} is a directory — the database file does not exist on the host.\n"
+            "Docker created an empty directory at the mount point.\n"
+            "Run 3gpppub-dns-database-population.py first, then re-mount the file:\n"
+            "  docker run --rm -v $(pwd)/epdg/database.db:/data/database.db 3gpp-explorer stats"
+        )
+    if not path.is_file():
         raise FileNotFoundError(
             f"Database not found: {path}\n"
             "Run 3gpppub-dns-database-population.py first."
