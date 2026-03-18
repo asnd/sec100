@@ -1,62 +1,368 @@
-import dns.resolver
-import time
-import requests
-from dns.resolver import NXDOMAIN
+#!/usr/bin/env python3
+"""
+3GPP Public Domain DNS Scanner
+Discovers and stores DNS records for 3GPP public network services
+across all known MCC/MNC operator pairs.
+
+Services checked (pub.3gppnetwork.org zone):
+
+  VoWiFi / ePDG:
+    epdg.epc       — ePDG (Wi-Fi Calling gateway, IKEv2/IPsec)
+    ss.epdg.epc    — ePDG steering / load-balancing prefix (T-Mobile US)
+    sos.epdg.epc   — Emergency ePDG (IKEv2 for SOS calls over Wi-Fi)
+    vowifi         — Non-standard VoWiFi alias (AT&T, some US operators)
+
+  5G Non-3GPP Access:
+    n3iwf.5gc      — N3IWF (5G untrusted non-3GPP access, replaces ePDG in 5GS)
+
+  IMS / VoLTE:
+    ims            — IMS core (VoLTE registration)
+    pcscf.ims      — P-CSCF discovery (SIP signaling entry point)
+    mmtel.ims      — MMTel supplementary services (call fwd, barring etc.)
+    xcap.ims       — XCAP device/service configuration
+    ut.ims         — Ut interface for supplementary service config (TS 24.623)
+
+  Emergency:
+    sos            — SOS/Emergency services
+    sos.ims        — Emergency IMS
+    aes            — Authentication/Emergency services (T-Mobile MX, MCC334)
+
+  Other:
+    bsf            — Bootstrapping Server Function (5G auth, TS 33.220)
+    gan            — GAN/UMA (Generic/Unlicensed Access Network)
+    rcs            — Rich Communication Services (GSMA IR.94)
+    subs           — Subscription/provisioning (Canadian MNOs, MCC302)
+    cota-sdk       — COTA (Carrier Over-The-Air) config endpoint (T-Mobile MX)
+"""
+
+import argparse
+import json
+import logging
 import sqlite3
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+from pathlib import Path
 
-def check_dns_records(mnc, mcc, operator, parent_domain, subdomains, cursor):
-    available_fqdns = []
-    for subdomain in subdomains:
-        fqdn = f"{subdomain}.mnc{mnc:03d}.mcc{mcc:03d}.{parent_domain}"
+import dns.resolver
+import requests
+from dns.resolver import NXDOMAIN, NoAnswer, Timeout
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("3gpppub-scan.log"),
+    ],
+)
+log = logging.getLogger(__name__)
+
+PARENT_DOMAIN = "pub.3gppnetwork.org"
+
+# Complete subdomain list — all known pub.3gppnetwork.org service labels
+SUBDOMAINS = [
+    # VoWiFi / ePDG
+    "epdg.epc",
+    "ss.epdg.epc",       # ePDG steering/load-balancing (T-Mobile US)
+    "sos.epdg.epc",      # Emergency ePDG
+    "vowifi",             # Non-standard VoWiFi alias
+    # 5G non-3GPP access
+    "n3iwf.5gc",          # N3IWF — replaces ePDG in 5GS (3GPP TS 23.502)
+    # IMS / VoLTE
+    "ims",
+    "pcscf.ims",          # P-CSCF discovery (3GPP TS 24.229)
+    "mmtel.ims",          # MMTel supplementary services (3GPP TS 24.173)
+    "xcap.ims",           # XCAP config (3GPP TS 24.623)
+    "ut.ims",             # Ut interface (3GPP TS 24.623)
+    # Emergency
+    "sos",
+    "sos.ims",
+    "aes",                # Auth/Emergency services (T-Mobile MX)
+    # Other
+    "bsf",                # Bootstrapping Server Function (3GPP TS 33.220)
+    "gan",                # GAN/UMA (3GPP TS 44.318)
+    "rcs",                # Rich Communication Services (GSMA IR.94)
+    "subs",               # Subscription/provisioning (Canadian MNOs)
+    "cota-sdk",           # COTA Over-The-Air config (T-Mobile MX)
+]
+
+MCC_MNC_URL = "https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json"
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS operators (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    mnc          INTEGER NOT NULL,
+    mcc          INTEGER NOT NULL,
+    operator     TEXT    NOT NULL,
+    country_name TEXT,
+    country_code TEXT,
+    last_scanned TIMESTAMP,
+    UNIQUE(mnc, mcc)
+);
+
+CREATE TABLE IF NOT EXISTS available_fqdns (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    mnc          INTEGER NOT NULL,
+    mcc          INTEGER NOT NULL,
+    operator     TEXT    NOT NULL,
+    country_name TEXT,
+    fqdn         TEXT    NOT NULL,
+    record_type  TEXT    NOT NULL DEFAULT 'A',
+    resolved_ips TEXT,
+    first_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(fqdn, record_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fqdns_mcc     ON available_fqdns(mcc);
+CREATE INDEX IF NOT EXISTS idx_fqdns_country ON available_fqdns(country_name);
+CREATE INDEX IF NOT EXISTS idx_ops_country   ON operators(country_name);
+"""
+
+
+def init_db(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA)
+    conn.commit()
+    return conn
+
+
+def resolve_fqdn(fqdn: str, record_type: str, retries: int = 2) -> list[str]:
+    for attempt in range(retries + 1):
         try:
-            answers = dns.resolver.resolve(fqdn, 'A')
-            if answers:
-                print(f"Found A record for {fqdn}")
-                available_fqdns.append(fqdn)
-        except NXDOMAIN:
-            pass
+            answers = dns.resolver.resolve(fqdn, record_type)
+            return [rdata.address for rdata in answers]
+        except (NXDOMAIN, NoAnswer):
+            return []
+        except Timeout:
+            if attempt < retries:
+                time.sleep(0.3 * (attempt + 1))
+            return []
         except Exception:
-            pass
+            return []
+    return []
 
-        time.sleep(0.5)  # Add a 0.5-second pause
 
-    # Insert data into the first table
-    cursor.execute("INSERT INTO operators (mnc, mcc, operator) VALUES (?, ?, ?)", (mnc, mcc, operator))
+def check_operator(item: dict, subdomains: list[str], record_types: list[str]) -> dict:
+    try:
+        mcc = int(item["mcc"])
+        mnc = int(item["mnc"])
+    except (KeyError, ValueError):
+        return {}
 
-    # Insert data into the second table
-    for fqdn in available_fqdns:
-        cursor.execute("INSERT INTO available_fqdns (operator, fqdn) VALUES (?, ?)", (operator, fqdn))
+    operator     = item.get("operator", "Unknown")
+    country_name = item.get("countryName", "Unknown")
+    country_code = item.get("countryCode", "")
+
+    found = []
+    for subdomain in subdomains:
+        fqdn = f"{subdomain}.mnc{mnc:03d}.mcc{mcc:03d}.{PARENT_DOMAIN}"
+        for rtype in record_types:
+            ips = resolve_fqdn(fqdn, rtype)
+            if ips:
+                found.append({
+                    "fqdn":         fqdn,
+                    "record_type":  rtype,
+                    "resolved_ips": ",".join(ips),
+                })
+                log.info("  [+] %s %s -> %s", rtype, fqdn, ", ".join(ips))
+
+    return {
+        "mnc": mnc, "mcc": mcc,
+        "operator": operator, "country_name": country_name,
+        "country_code": country_code,
+        "found": found,
+    }
+
+
+def save_result(conn: sqlite3.Connection, result: dict) -> None:
+    if not result:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO operators (mnc, mcc, operator, country_name, country_code, last_scanned)
+            VALUES (:mnc, :mcc, :operator, :country_name, :country_code, :now)
+            ON CONFLICT(mnc, mcc) DO UPDATE SET
+                operator     = excluded.operator,
+                country_name = excluded.country_name,
+                country_code = excluded.country_code,
+                last_scanned = excluded.last_scanned
+            """,
+            {**result, "now": now},
+        )
+        for fqdn_entry in result.get("found", []):
+            conn.execute(
+                """
+                INSERT INTO available_fqdns
+                    (mnc, mcc, operator, country_name, fqdn, record_type, resolved_ips, first_seen, last_seen)
+                VALUES
+                    (:mnc, :mcc, :operator, :country_name, :fqdn, :record_type, :resolved_ips, :now, :now)
+                ON CONFLICT(fqdn, record_type) DO UPDATE SET
+                    resolved_ips = excluded.resolved_ips,
+                    last_seen    = excluded.last_seen
+                """,
+                {
+                    "mnc":          result["mnc"],
+                    "mcc":          result["mcc"],
+                    "operator":     result["operator"],
+                    "country_name": result["country_name"],
+                    "fqdn":         fqdn_entry["fqdn"],
+                    "record_type":  fqdn_entry["record_type"],
+                    "resolved_ips": fqdn_entry["resolved_ips"],
+                    "now":          now,
+                },
+            )
+
+
+def load_mcc_mnc_list(source: str) -> list[dict]:
+    if source.startswith("http"):
+        log.info("Fetching MCC/MNC list from %s", source)
+        response = requests.get(source, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    log.info("Loading MCC/MNC list from %s", source)
+    with open(source) as f:
+        return json.load(f)
+
+
+def print_summary(conn: sqlite3.Connection) -> None:
+    rows = conn.execute(
+        """
+        SELECT country_name,
+               COUNT(DISTINCT mcc || '-' || mnc) AS operators,
+               COUNT(*) AS total_fqdns
+        FROM available_fqdns
+        GROUP BY country_name
+        ORDER BY total_fqdns DESC
+        LIMIT 20
+        """
+    ).fetchall()
+    print("\n--- Top 20 Countries by Discovered Services ---")
+    print(f"{'Country':<35} {'Operators':>9} {'FQDNs':>7}")
+    print("-" * 55)
+    for row in rows:
+        print(f"{row['country_name']:<35} {row['operators']:>9} {row['total_fqdns']:>7}")
+
+    # Per-service breakdown
+    svc_rows = conn.execute(
+        """
+        SELECT
+            CASE
+              WHEN fqdn LIKE 'ss.epdg.epc%'    THEN 'ss.epdg.epc'
+              WHEN fqdn LIKE 'sos.epdg.epc%'   THEN 'sos.epdg.epc'
+              WHEN fqdn LIKE 'epdg.epc%'        THEN 'epdg.epc'
+              WHEN fqdn LIKE 'n3iwf.5gc%'       THEN 'n3iwf.5gc'
+              WHEN fqdn LIKE 'vowifi%'           THEN 'vowifi'
+              WHEN fqdn LIKE 'pcscf.ims%'        THEN 'pcscf.ims'
+              WHEN fqdn LIKE 'mmtel.ims%'        THEN 'mmtel.ims'
+              WHEN fqdn LIKE 'xcap.ims%'         THEN 'xcap.ims'
+              WHEN fqdn LIKE 'sos.ims%'          THEN 'sos.ims'
+              WHEN fqdn LIKE 'ut.ims%'           THEN 'ut.ims'
+              WHEN fqdn LIKE 'ims%'              THEN 'ims'
+              WHEN fqdn LIKE 'bsf%'              THEN 'bsf'
+              WHEN fqdn LIKE 'gan%'              THEN 'gan'
+              WHEN fqdn LIKE 'sos%'              THEN 'sos'
+              WHEN fqdn LIKE 'aes%'              THEN 'aes'
+              WHEN fqdn LIKE 'rcs%'              THEN 'rcs'
+              WHEN fqdn LIKE 'subs%'             THEN 'subs'
+              WHEN fqdn LIKE 'cota-sdk%'         THEN 'cota-sdk'
+              ELSE 'other'
+            END AS service,
+            COUNT(DISTINCT mcc || '-' || mnc) AS operators
+        FROM available_fqdns
+        GROUP BY service
+        ORDER BY operators DESC
+        """
+    ).fetchall()
+    print("\n--- Discovered Services ---")
+    for row in svc_rows:
+        print(f"  {row[0]:<20} {row[1]:>5} operators")
+
+    totals = conn.execute(
+        "SELECT COUNT(*) AS fqdns, COUNT(DISTINCT country_name) AS countries FROM available_fqdns"
+    ).fetchone()
+    print(f"\nTotal FQDNs found : {totals['fqdns']}")
+    print(f"Countries covered : {totals['countries']}")
+
 
 def main():
-    parent_domain = "pub.3gppnetwork.org"
-    subdomains = ["ims", "epdg.epc", "bsf", "gan", "xcap.ims"]
+    parser = argparse.ArgumentParser(
+        description="Scan 3GPP public DNS records for all known MCC/MNC pairs."
+    )
+    parser.add_argument("--db",      default="database.db")
+    parser.add_argument("--source",  default=MCC_MNC_URL)
+    parser.add_argument("--workers", type=int, default=10)
+    parser.add_argument("--ipv6",    action="store_true")
+    parser.add_argument(
+        "--subdomains", nargs="+", default=SUBDOMAINS,
+        help="Subdomains to probe (default: all known pub.3gppnetwork.org services)",
+    )
+    parser.add_argument("--summary-only", action="store_true")
+    args = parser.parse_args()
 
-    # Connect to SQLite database
-    conn = sqlite3.connect('database.db')
-    cursor = conn.cursor()
+    conn = init_db(args.db)
 
-    # Create tables if they don't exist
-    cursor.execute('''CREATE TABLE IF NOT EXISTS operators
-                      (mnc INTEGER, mcc INTEGER, operator TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS available_fqdns
-                      (operator TEXT, fqdn TEXT)''')
+    if args.summary_only:
+        print_summary(conn)
+        conn.close()
+        return
 
-    # Fetch MCC-MNC pairs from JSON file
-    response = requests.get('https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json')
-    mcc_mnc_list = response.json()
+    record_types = ["A", "AAAA"] if args.ipv6 else ["A"]
+    log.info(
+        "Starting scan | workers=%d | record_types=%s | %d subdomains",
+        args.workers, record_types, len(args.subdomains),
+    )
 
-    for item in mcc_mnc_list:
-        try:
-            mcc = int(item['mcc'])
-            mnc = int(item['mnc'])
-            operator = item['operator']
-            print(item['countryName'], " ", operator)
-            check_dns_records(mnc, mcc, operator, parent_domain, subdomains, cursor)
-        except Exception:
-            pass
-    # Commit the changes and close the connection
-    conn.commit()
+    mcc_mnc_list = load_mcc_mnc_list(args.source)
+    total        = len(mcc_mnc_list)
+    log.info("Loaded %d MCC/MNC entries", total)
+
+    completed = found_total = 0
+    start_time = time.time()
+
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {
+            executor.submit(check_operator, item, args.subdomains, record_types): item
+            for item in mcc_mnc_list
+        }
+        for future in as_completed(futures):
+            completed += 1
+            try:
+                result = future.result()
+                if result:
+                    save_result(conn, result)
+                    found_this = len(result.get("found", []))
+                    found_total += found_this
+                    if found_this:
+                        log.info(
+                            "[%d/%d] %s (%s) -> %d records",
+                            completed, total,
+                            result["operator"], result["country_name"], found_this,
+                        )
+                    elif completed % 100 == 0:
+                        elapsed = time.time() - start_time
+                        rate = completed / elapsed
+                        eta  = (total - completed) / rate if rate > 0 else 0
+                        log.info(
+                            "[%d/%d] %.1f ops/s | ETA %.0fs | found %d FQDNs so far",
+                            completed, total, rate, eta, found_total,
+                        )
+            except Exception as exc:
+                log.warning("Worker error: %s", exc)
+
+    elapsed = time.time() - start_time
+    log.info(
+        "Scan complete in %.1fs | %d operators | %d FQDNs found",
+        elapsed, completed, found_total,
+    )
+    print_summary(conn)
     conn.close()
+
 
 if __name__ == "__main__":
     main()

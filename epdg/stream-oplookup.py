@@ -14,11 +14,30 @@ import streamlit as st
 DB_PATH = Path(__file__).parent / "database.db"
 
 SERVICE_COLORS = {
-    "epdg.epc": "#1f77b4",
-    "ims":      "#ff7f0e",
-    "bsf":      "#2ca02c",
-    "xcap.ims": "#d62728",
-    "gan":      "#9467bd",
+    # VoWiFi / ePDG
+    "epdg.epc":     "#1f77b4",
+    "ss.epdg.epc":  "#aec7e8",
+    "sos.epdg.epc": "#17becf",
+    "vowifi":        "#9edae5",
+    # 5G non-3GPP
+    "n3iwf.5gc":    "#bcbd22",
+    # IMS / VoLTE
+    "ims":          "#ff7f0e",
+    "pcscf.ims":    "#ffbb78",
+    "mmtel.ims":    "#ff9896",
+    "xcap.ims":     "#d62728",
+    "ut.ims":       "#e377c2",
+    # Emergency
+    "sos":          "#e41a1c",
+    "sos.ims":      "#f7b6d2",
+    "aes":          "#c49c94",
+    # Other
+    "bsf":          "#2ca02c",
+    "gan":          "#9467bd",
+    "rcs":          "#8c564b",
+    "subs":         "#7f7f7f",
+    "cota-sdk":     "#c5b0d5",
+    "other":        "#c7c7c7",
 }
 
 st.set_page_config(
@@ -47,11 +66,24 @@ def load_fqdns() -> pd.DataFrame:
                f.fqdn, f.record_type, f.resolved_ips,
                f.first_seen, f.last_seen,
                CASE
-                 WHEN f.fqdn LIKE 'epdg.epc%' THEN 'epdg.epc'
-                 WHEN f.fqdn LIKE 'xcap.ims%' THEN 'xcap.ims'
-                 WHEN f.fqdn LIKE 'ims%'      THEN 'ims'
-                 WHEN f.fqdn LIKE 'bsf%'      THEN 'bsf'
-                 WHEN f.fqdn LIKE 'gan%'      THEN 'gan'
+                 WHEN f.fqdn LIKE 'ss.epdg.epc%'    THEN 'ss.epdg.epc'
+                 WHEN f.fqdn LIKE 'sos.epdg.epc%'   THEN 'sos.epdg.epc'
+                 WHEN f.fqdn LIKE 'epdg.epc%'        THEN 'epdg.epc'
+                 WHEN f.fqdn LIKE 'n3iwf.5gc%'       THEN 'n3iwf.5gc'
+                 WHEN f.fqdn LIKE 'vowifi%'           THEN 'vowifi'
+                 WHEN f.fqdn LIKE 'pcscf.ims%'        THEN 'pcscf.ims'
+                 WHEN f.fqdn LIKE 'mmtel.ims%'        THEN 'mmtel.ims'
+                 WHEN f.fqdn LIKE 'xcap.ims%'         THEN 'xcap.ims'
+                 WHEN f.fqdn LIKE 'ut.ims%'           THEN 'ut.ims'
+                 WHEN f.fqdn LIKE 'sos.ims%'          THEN 'sos.ims'
+                 WHEN f.fqdn LIKE 'ims%'              THEN 'ims'
+                 WHEN f.fqdn LIKE 'bsf%'              THEN 'bsf'
+                 WHEN f.fqdn LIKE 'gan%'              THEN 'gan'
+                 WHEN f.fqdn LIKE 'sos%'              THEN 'sos'
+                 WHEN f.fqdn LIKE 'aes%'              THEN 'aes'
+                 WHEN f.fqdn LIKE 'rcs%'              THEN 'rcs'
+                 WHEN f.fqdn LIKE 'subs%'             THEN 'subs'
+                 WHEN f.fqdn LIKE 'cota-sdk%'         THEN 'cota-sdk'
                  ELSE 'other'
                END AS service
         FROM available_fqdns f
@@ -72,7 +104,13 @@ def load_operators() -> pd.DataFrame:
 
 
 def service_label(fqdn: str) -> str:
-    for svc in ("epdg.epc", "xcap.ims", "ims", "bsf", "gan"):
+    for svc in (
+        "ss.epdg.epc", "sos.epdg.epc", "epdg.epc",
+        "n3iwf.5gc", "vowifi",
+        "pcscf.ims", "mmtel.ims", "xcap.ims", "ut.ims", "sos.ims", "ims",
+        "sos", "aes",
+        "bsf", "gan", "rcs", "subs", "cota-sdk",
+    ):
         if fqdn.startswith(svc):
             return svc
     return "other"
@@ -111,7 +149,8 @@ if operator_search:
 st.title("📡 3GPP Public Domain Explorer")
 st.caption(
     "Discovered DNS records in `pub.3gppnetwork.org` — "
-    "services: ims · epdg.epc · bsf · gan · xcap.ims"
+    "services: epdg.epc · n3iwf.5gc · ims · pcscf.ims · mmtel.ims · xcap.ims · "
+    "sos · aes · bsf · rcs · subs · cota-sdk · gan · vowifi"
 )
 
 # ── Top metrics ────────────────────────────────────────────────────────────────
@@ -345,11 +384,15 @@ with tab_score:
     )
 
     SCORE_WEIGHTS = {
-        "epdg.epc": ("VoWiFi (ePDG)",           25, "📶"),
-        "ims":      ("VoLTE (IMS)",              20, "📞"),
-        "xcap.ims": ("Device Mgmt (XCAP/IMS)",  15, "⚙️"),
-        "bsf":      ("5G Auth (BSF)",            20, "🔐"),
-        "gan":      ("UMA/GAN (WiFi Calling)",   10, "📡"),
+        "epdg.epc":    ("VoWiFi (ePDG)",           20, "📶"),
+        "n3iwf.5gc":   ("5G VoWiFi (N3IWF)",        15, "🛜"),
+        "ims":         ("VoLTE (IMS)",               15, "📞"),
+        "pcscf.ims":   ("P-CSCF discovery",          10, "🔀"),
+        "xcap.ims":    ("Device Mgmt (XCAP)",        10, "⚙️"),
+        "bsf":         ("5G Auth (BSF)",             10, "🔐"),
+        "rcs":         ("RCS messaging",             10, "💬"),
+        "sos":         ("Emergency SOS",              5, "🆘"),
+        "gan":         ("UMA/GAN (WiFi Calling)",     5, "📡"),
     }
 
     # Per-operator service pivot
@@ -411,7 +454,7 @@ with tab_score:
     sel_score_country = st.multiselect(
         "Filter by country", score_countries, placeholder="All countries", key="score_country"
     )
-    min_score = st.slider("Minimum score", 0, 110, 0, key="min_score")
+    min_score = st.slider("Minimum score", 0, 120, 0, key="min_score")
 
     filtered_scores = score_pivot.copy()
     if sel_score_country:
@@ -442,8 +485,10 @@ with tab_score:
         st.plotly_chart(fig_top, use_container_width=True)
 
     # Leaderboard table
-    display_svc_cols = [c for c in ["epdg.epc","ims","xcap.ims","bsf","gan","5g_sa"]
-                        if c in filtered_scores.columns]
+    display_svc_cols = [c for c in [
+        "epdg.epc", "n3iwf.5gc", "ims", "pcscf.ims", "xcap.ims",
+        "bsf", "rcs", "sos", "gan", "5g_sa",
+    ] if c in filtered_scores.columns]
     show_cols = ["rank", "country_name", "operator", "mcc", "mnc", "score", "capabilities"] + display_svc_cols
 
     st.dataframe(
@@ -451,8 +496,9 @@ with tab_score:
             "rank": "#", "country_name": "Country", "operator": "Operator",
             "mcc": "MCC", "mnc": "MNC", "score": "Score",
             "capabilities": "Services", "epdg.epc": "ePDG",
-            "ims": "IMS", "xcap.ims": "XCAP", "bsf": "BSF",
-            "gan": "GAN", "5g_sa": "5G SA",
+            "n3iwf.5gc": "N3IWF", "ims": "IMS", "pcscf.ims": "P-CSCF",
+            "xcap.ims": "XCAP", "bsf": "BSF", "rcs": "RCS",
+            "sos": "SOS", "gan": "GAN", "5g_sa": "5G SA",
         }),
         use_container_width=True,
         hide_index=True,
@@ -466,7 +512,7 @@ with tab_score:
         for svc, (label, pts, icon) in SCORE_WEIGHTS.items():
             st.markdown(f"| {icon} {label} | **+{pts}** | `{svc}.*` record present |")
         st.markdown("| 🚀 5G SA | **+20** | NRF/SEPP found by `3gpppub-5g-discovery.py` |")
-        st.markdown("\n**Max score: 110**")
+        st.markdown("\n**Max score: 120**")
 
 # ── ASN / Hosting ─────────────────────────────────────────────────────────────
 
@@ -495,10 +541,24 @@ with tab_asn:
             SELECT operator, country_name, fqdn, record_type, resolved_ips,
                    asn, asn_org, hosting_provider, ip_country,
                    CASE
-                     WHEN fqdn LIKE 'epdg.epc%' THEN 'epdg.epc'
-                     WHEN fqdn LIKE 'xcap.ims%' THEN 'xcap.ims'
-                     WHEN fqdn LIKE 'ims%'      THEN 'ims'
-                     WHEN fqdn LIKE 'bsf%'      THEN 'bsf'
+                     WHEN fqdn LIKE 'ss.epdg.epc%'    THEN 'ss.epdg.epc'
+                     WHEN fqdn LIKE 'sos.epdg.epc%'   THEN 'sos.epdg.epc'
+                     WHEN fqdn LIKE 'epdg.epc%'        THEN 'epdg.epc'
+                     WHEN fqdn LIKE 'n3iwf.5gc%'       THEN 'n3iwf.5gc'
+                     WHEN fqdn LIKE 'vowifi%'           THEN 'vowifi'
+                     WHEN fqdn LIKE 'pcscf.ims%'        THEN 'pcscf.ims'
+                     WHEN fqdn LIKE 'mmtel.ims%'        THEN 'mmtel.ims'
+                     WHEN fqdn LIKE 'xcap.ims%'         THEN 'xcap.ims'
+                     WHEN fqdn LIKE 'ut.ims%'           THEN 'ut.ims'
+                     WHEN fqdn LIKE 'sos.ims%'          THEN 'sos.ims'
+                     WHEN fqdn LIKE 'ims%'              THEN 'ims'
+                     WHEN fqdn LIKE 'bsf%'              THEN 'bsf'
+                     WHEN fqdn LIKE 'gan%'              THEN 'gan'
+                     WHEN fqdn LIKE 'sos%'              THEN 'sos'
+                     WHEN fqdn LIKE 'aes%'              THEN 'aes'
+                     WHEN fqdn LIKE 'rcs%'              THEN 'rcs'
+                     WHEN fqdn LIKE 'subs%'             THEN 'subs'
+                     WHEN fqdn LIKE 'cota-sdk%'         THEN 'cota-sdk'
                      ELSE 'other'
                    END AS service
             FROM available_fqdns

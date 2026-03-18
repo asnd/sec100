@@ -283,7 +283,7 @@ def main():
     parser.add_argument("--summary-only", action="store_true")
     parser.add_argument(
         "--services", nargs="+",
-        default=["ims", "epdg.epc", "xcap.ims", "bsf"],
+        default=["ims", "epdg.epc", "pcscf.ims", "xcap.ims", "bsf", "n3iwf.5gc"],
         help="Services to probe for NAPTR/SRV",
     )
     args = parser.parse_args()

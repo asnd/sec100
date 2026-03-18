@@ -39,10 +39,23 @@ operator infrastructure from untrusted networks (Wi-Fi, internet).
 | Service | Purpose |
 |---|---|
 | `epdg.epc.*` | ePDG — VoWiFi / Wi-Fi Calling gateway (IKEv2) |
+| `ss.epdg.epc.*` | ePDG steering / load-balancing prefix (T-Mobile US) |
+| `sos.epdg.epc.*` | Emergency ePDG for SOS calls over Wi-Fi |
+| `vowifi.*` | Non-standard VoWiFi alias (AT&T, some US operators) |
+| `n3iwf.5gc.*` | N3IWF — 5G untrusted non-3GPP access (replaces ePDG in 5GS) |
 | `ims.*` | IMS core — VoLTE registration |
-| `bsf.*` | Bootstrapping Server — 5G authentication |
+| `pcscf.ims.*` | P-CSCF discovery — SIP signaling entry point |
+| `mmtel.ims.*` | MMTel supplementary services (call forwarding, barring) |
 | `xcap.ims.*` | XCAP — device / supplementary service config |
+| `ut.ims.*` | Ut interface — supplementary service config (TS 24.623) |
+| `sos.*` | SOS / Emergency services |
+| `sos.ims.*` | Emergency IMS |
+| `aes.*` | Auth/Emergency services (T-Mobile MX, MCC 334) |
+| `bsf.*` | Bootstrapping Server Function — 5G authentication (TS 33.220) |
 | `gan.*` | GAN/UMA — unlicensed access network |
+| `rcs.*` | Rich Communication Services (GSMA IR.94) |
+| `subs.*` | Subscription/provisioning (Canadian MNOs, MCC 302) |
+| `cota-sdk.*` | COTA — Carrier Over-The-Air config endpoint (T-Mobile MX) |
 
 ### Quick Start
 
@@ -69,15 +82,19 @@ streamlit run epdg/stream-oplookup.py
 | `3gpppub-grx-access.py` | — | GRX/IPX DNS helper: RIPE Atlas, open-resolver discovery, zone walk |
 | `3gpppub-dns-checker.py` | — | Lightweight TSV checker (no DB required) |
 
-### Operator Capability Scoring (0–110 pts)
+### Operator Capability Scoring (0–120 pts)
 
 | Service | Points | Indicator |
 |---|---|---|
-| VoWiFi (ePDG) | +25 | `epdg.epc.*` record present |
-| VoLTE (IMS) | +20 | `ims.*` record present |
-| Device Mgmt (XCAP) | +15 | `xcap.ims.*` record present |
-| 5G Auth (BSF) | +20 | `bsf.*` record present |
-| UMA/GAN | +10 | `gan.*` record present |
+| VoWiFi (ePDG) | +20 | `epdg.epc.*` record present |
+| 5G VoWiFi (N3IWF) | +15 | `n3iwf.5gc.*` record present |
+| VoLTE (IMS) | +15 | `ims.*` record present |
+| P-CSCF discovery | +10 | `pcscf.ims.*` record present |
+| Device Mgmt (XCAP) | +10 | `xcap.ims.*` record present |
+| 5G Auth (BSF) | +10 | `bsf.*` record present |
+| RCS messaging | +10 | `rcs.*` record present |
+| Emergency SOS | +5 | `sos.*` record present |
+| UMA/GAN | +5 | `gan.*` record present |
 | 5G SA (NRF/SEPP) | +20 | NRF/SEPP in `fiveg_fqdns` |
 
 ### Typical Workflow

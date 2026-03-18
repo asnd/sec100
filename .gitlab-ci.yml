@@ -314,3 +314,54 @@ EOF
   rules:
     - changes:
         - epdg/*.py
+
+subdomain_consistency:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script: []
+  script:
+    - python3 - << 'EOF'
+import ast, sys
+
+EXPECTED = {
+    "epdg.epc", "ss.epdg.epc", "sos.epdg.epc", "vowifi",
+    "n3iwf.5gc",
+    "ims", "pcscf.ims", "mmtel.ims", "xcap.ims", "ut.ims",
+    "sos", "sos.ims", "aes",
+    "bsf", "gan", "rcs", "subs", "cota-sdk",
+}
+
+def extract_subdomains(path):
+    with open(path) as fh:
+        tree = ast.parse(fh.read())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == 'SUBDOMAINS':
+                    return {elt.s for elt in node.value.elts
+                            if isinstance(elt, ast.Constant)}
+    return None
+
+errors = 0
+for path in [
+    'epdg/3gpppub-dns-database-population.py',
+    'epdg/3gpppub-dns-checker.py',
+]:
+    found = extract_subdomains(path)
+    if found is None:
+        print(f'FAIL {path}: SUBDOMAINS not found')
+        errors += 1
+        continue
+    missing = EXPECTED - found
+    extra   = found - EXPECTED
+    if missing or extra:
+        print(f'FAIL {path}: missing={missing} extra={extra}')
+        errors += 1
+    else:
+        print(f'OK   {path}: {len(found)} subdomains')
+
+sys.exit(errors)
+EOF
+  rules:
+    - changes:
+        - epdg/*.py

@@ -79,6 +79,31 @@ epdg/
 The `pub.` zone is the primary target. The `5gc.` zone requires GRX/IPX
 connectivity; use `--dns-server <GRX_IP>` to target a GRX resolver.
 
+### Known `pub.3gppnetwork.org` subdomains (18 total)
+
+| Subdomain | Category | Notes |
+|---|---|---|
+| `epdg.epc` | VoWiFi | ePDG — IKEv2/IPsec Wi-Fi Calling gateway |
+| `ss.epdg.epc` | VoWiFi | ePDG steering/load-balancing (T-Mobile US) |
+| `sos.epdg.epc` | VoWiFi / Emergency | Emergency ePDG (SOS over Wi-Fi) |
+| `vowifi` | VoWiFi | Non-standard alias (AT&T, some US operators) |
+| `n3iwf.5gc` | 5G non-3GPP | N3IWF — replaces ePDG in 5GS (TS 23.502) |
+| `ims` | IMS | IMS core — VoLTE registration |
+| `pcscf.ims` | IMS | P-CSCF discovery — SIP entry point (TS 24.229) |
+| `mmtel.ims` | IMS | MMTel supplementary services (TS 24.173) |
+| `xcap.ims` | IMS | XCAP device/service config (TS 24.623) |
+| `ut.ims` | IMS | Ut interface — supplementary service config (TS 24.623) |
+| `sos` | Emergency | SOS/Emergency services |
+| `sos.ims` | Emergency | Emergency IMS |
+| `aes` | Emergency | Auth/Emergency services (T-Mobile MX, MCC 334) |
+| `bsf` | Auth | Bootstrapping Server Function (TS 33.220) |
+| `gan` | Access | GAN/UMA — unlicensed access network (TS 44.318) |
+| `rcs` | Messaging | Rich Communication Services (GSMA IR.94) |
+| `subs` | Provisioning | Subscription/provisioning (Canadian MNOs, MCC 302) |
+| `cota-sdk` | Provisioning | COTA Over-The-Air config (T-Mobile MX) |
+
+**FQDN pattern:** `<subdomain>.mnc<MNC:03d>.mcc<MCC:03d>.pub.3gppnetwork.org`
+
 ---
 
 ## CI Pipeline (`.gitlab-ci.yml`)
