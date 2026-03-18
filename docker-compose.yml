@@ -1,5 +1,18 @@
 services:
 
+  # ── Scan (run once to populate the database) ──────────────────────────────
+  # Usage:  docker compose run --rm scan
+  #         docker compose run --rm scan --workers 30
+  scan:
+    build: .
+    image: 3gpp-explorer
+    environment:
+      ENABLE_WEBUI: "0"
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+    command: ["scan", "--workers", "20"]
+    profiles: [scan]
+
   # ── CLI mode (default) ────────────────────────────────────────────────────
   # Usage:  docker compose run --rm cli stats
   #         docker compose run --rm cli score --top 10
@@ -9,9 +22,8 @@ services:
     image: 3gpp-explorer
     environment:
       ENABLE_WEBUI: "0"
-      DB_PATH: /data/database.db
     volumes:
-      - ${DB_FILE:-./epdg/database.db}:/data/database.db:ro
+      - ${DATA_DIR:-./data}:/data
     profiles: [cli]
 
   # ── Web UI mode ───────────────────────────────────────────────────────────
@@ -22,9 +34,8 @@ services:
     image: 3gpp-explorer
     environment:
       ENABLE_WEBUI: "1"
-      DB_PATH: /data/database.db
     volumes:
-      - ${DB_FILE:-./epdg/database.db}:/data/database.db:ro
+      - ${DATA_DIR:-./data}:/data
     ports:
       - "8501:8501"
     profiles: [webui]

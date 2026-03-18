@@ -1,18 +1,19 @@
 # 3GPP Public Domain Explorer
 # ─────────────────────────────────────────────────────────────────────────────
-# Default mode : CLI  (ENABLE_WEBUI=0)
-# Web UI mode  : set ENABLE_WEBUI=1 and expose port 8501
+# Quick start (mount a directory — Docker creates it automatically):
 #
-# Build:
+#   mkdir -p data
 #   docker build -t 3gpp-explorer .
 #
-# Run CLI:
-#   docker run --rm -v $(pwd)/epdg/database.db:/data/database.db 3gpp-explorer stats
-#   docker run --rm -v $(pwd)/epdg/database.db:/data/database.db 3gpp-explorer score --top 10
+#   # Step 1: populate the database
+#   docker run --rm -v $(pwd)/data:/data 3gpp-explorer scan --workers 20
 #
-# Run Web UI:
-#   docker run --rm -e ENABLE_WEBUI=1 -p 8501:8501 \
-#              -v $(pwd)/epdg/database.db:/data/database.db 3gpp-explorer
+#   # Step 2: query
+#   docker run --rm -v $(pwd)/data:/data 3gpp-explorer stats
+#   docker run --rm -v $(pwd)/data:/data 3gpp-explorer score --top 10
+#
+#   # Step 3 (optional): web UI
+#   docker run -e ENABLE_WEBUI=1 -p 8501:8501 -v $(pwd)/data:/data 3gpp-explorer
 # ─────────────────────────────────────────────────────────────────────────────
 
 FROM python:3.11-slim
@@ -33,12 +34,12 @@ COPY epdg/ /app/epdg/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Database is mounted at runtime — never baked into the image
+# Data directory — mount a host directory here at runtime
 VOLUME ["/data"]
 
 # Feature flag: 0 = CLI (default), 1 = Streamlit web UI
 ENV ENABLE_WEBUI=0
-# Path to the mounted database
+ENV DATA_DIR=/data
 ENV DB_PATH=/data/database.db
 
 # Streamlit web UI port (unused in CLI mode)
@@ -46,5 +47,5 @@ EXPOSE 8501
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-# Default command when no args given in CLI mode
+# Default: show stats. Run 'scan' first if database.db doesn't exist yet.
 CMD ["stats"]

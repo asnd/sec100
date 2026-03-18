@@ -1,28 +1,28 @@
 #!/bin/sh
 # Docker entrypoint for 3GPP Public Domain Explorer
 #
-# Feature flag:
-#   ENABLE_WEBUI=0  (default) — run the CLI; any extra args forwarded to 3gpppub-cli.py
-#   ENABLE_WEBUI=1            — start the Streamlit web UI on port 8501
+# Mount a writable data directory — Docker will create it if it doesn't exist:
+#   mkdir -p data
+#   docker run --rm -v $(pwd)/data:/data 3gpp-explorer <command>
 #
-# Examples:
-#   docker run 3gpp-explorer stats
-#   docker run 3gpp-explorer score --top 10
-#   docker run -e ENABLE_WEBUI=1 -p 8501:8501 3gpp-explorer
+# Commands:
+#   scan    [--workers N]   Run DNS scanner → writes /data/database.db
+#   stats                   Database overview
+#   countries               FQDNs per country
+#   services                Service breakdown
+#   operator --mcc M --mnc N
+#   search   <term>
+#   score    [--top N]
+#   export   [--format csv|json|tsv]
+#
+# Web UI (feature flag):
+#   docker run -e ENABLE_WEBUI=1 -p 8501:8501 -v $(pwd)/data:/data 3gpp-explorer
 
 set -e
 
-DB_PATH="${DB_PATH:-/data/database.db}"
+DATA_DIR="${DATA_DIR:-/data}"
+DB_PATH="${DB_PATH:-${DATA_DIR}/database.db}"
 export DB_PATH
-
-# Catch the common Docker mount mistake: host file missing → Docker creates a directory
-if [ -d "$DB_PATH" ]; then
-    echo "Error: $DB_PATH is a directory, not a database file." >&2
-    echo "The database file does not exist on the host — Docker created an empty directory." >&2
-    echo "Run 3gpppub-dns-database-population.py first, then mount the file:" >&2
-    echo "  docker run --rm -v \$(pwd)/epdg/database.db:/data/database.db 3gpp-explorer stats" >&2
-    exit 1
-fi
 
 if [ "${ENABLE_WEBUI:-0}" = "1" ]; then
     echo "Starting Streamlit web UI on :8501 ..."
@@ -31,7 +31,15 @@ if [ "${ENABLE_WEBUI:-0}" = "1" ]; then
         --server.address 0.0.0.0 \
         --server.headless true \
         --browser.gatherUsageStats false
-else
-    # Forward all docker run arguments to the CLI
-    exec python3 /app/epdg/3gpppub-cli.py --db "$DB_PATH" "$@"
 fi
+
+# Route the 'scan' command to the population script
+# (DB file may not exist yet — that's fine, the scanner creates it)
+if [ "${1:-}" = "scan" ]; then
+    shift
+    echo "Scanning 3GPP public DNS → ${DB_PATH}"
+    exec python3 /app/epdg/3gpppub-dns-database-population.py --db "$DB_PATH" "$@"
+fi
+
+# All other commands go to the CLI
+exec python3 /app/epdg/3gpppub-cli.py --db "$DB_PATH" "$@"
