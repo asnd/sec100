@@ -157,6 +157,67 @@ def cmd_countries(args) -> int:
     return 0
 
 
+def cmd_country(args) -> int:
+    """Per-service domain stats for one country (substring match)."""
+    conn = open_db(args.db)
+    df = query_fqdns(conn)
+    conn.close()
+
+    mask = df["country_name"].str.contains(args.name, case=False, na=False)
+    df = df[mask]
+    if df.empty:
+        print(f"No records found for country matching '{args.name}'.")
+        return 1
+
+    matched = sorted(df["country_name"].unique())
+    for country in matched:
+        cdf = df[df["country_name"] == country]
+
+        # Per-service counts
+        svc_counts = (
+            cdf.groupby("service")
+            .agg(operators=("mcc", "nunique"), fqdns=("fqdn", "count"))
+            .reset_index()
+            .sort_values("fqdns", ascending=False)
+        )
+
+        # Operator list
+        ops = (
+            cdf.groupby(["mcc", "mnc", "operator"])
+            .agg(fqdns=("fqdn", "count"), services=("service", lambda x: ", ".join(sorted(x.unique()))))
+            .reset_index()
+            .sort_values("fqdns", ascending=False)
+        )
+
+        total_ops = cdf[["mnc", "mcc"]].drop_duplicates().shape[0]
+        print_panel(
+            f"[bold]Country  :[/bold] {country}\n"
+            f"[bold]Operators:[/bold] {total_ops}\n"
+            f"[bold]FQDNs    :[/bold] {len(cdf)}",
+            title=f"Country Stats — {country}",
+            no_color=args.no_color,
+        )
+        print_rich_table(
+            ["Service", "Operators", "FQDNs"],
+            svc_counts[["service", "operators", "fqdns"]].values.tolist(),
+            title="Services",
+            col_styles=["cyan", "green", "yellow"],
+            no_color=args.no_color,
+        )
+        if args.operators:
+            print_rich_table(
+                ["MCC", "MNC", "Operator", "FQDNs", "Services"],
+                [
+                    [r["mcc"], f"{r['mnc']:03d}", r["operator"], r["fqdns"], r["services"]]
+                    for _, r in ops.iterrows()
+                ],
+                title="Operators",
+                col_styles=["green", "green", "cyan", "yellow", ""],
+                no_color=args.no_color,
+            )
+    return 0
+
+
 def cmd_services(args) -> int:
     conn = open_db(args.db)
     df = query_fqdns(conn)
@@ -327,6 +388,11 @@ def build_parser() -> argparse.ArgumentParser:
     sc = sub.add_parser("countries", help="FQDNs per country")
     sc.add_argument("--top", type=int, default=30, metavar="N")
 
+    # country (drill-down)
+    sct = sub.add_parser("country", help="Per-service domain stats for a specific country")
+    sct.add_argument("name", help="Country name (substring, case-insensitive)")
+    sct.add_argument("--operators", action="store_true", help="Also list individual operators")
+
     # services
     sub.add_parser("services", help="Global service breakdown")
 
@@ -356,6 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
 COMMANDS = {
     "stats":     cmd_stats,
     "countries": cmd_countries,
+    "country":   cmd_country,
     "services":  cmd_services,
     "operator":  cmd_operator,
     "search":    cmd_search,

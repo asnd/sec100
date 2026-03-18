@@ -43,7 +43,7 @@ def query_fqdns(
 ) -> pd.DataFrame:
     df = pd.read_sql_query(
         f"""
-        SELECT f.mnc, f.mcc, f.operator, f.country_name,
+        SELECT f.mnc, f.mcc, f.operator, COALESCE(f.country_name, 'Unknown') AS country_name,
                f.fqdn, f.record_type, f.resolved_ips,
                f.first_seen, f.last_seen,
                COALESCE(f.service, ({sql_case_when('f.fqdn')})) AS service

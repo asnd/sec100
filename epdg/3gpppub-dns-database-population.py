@@ -217,7 +217,7 @@ def load_mcc_mnc_list(source: str) -> list[dict]:
 def print_summary(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
-        SELECT country_name,
+        SELECT COALESCE(country_name, 'Unknown') AS country_name,
                COUNT(DISTINCT mcc || '-' || mnc) AS operators,
                COUNT(*) AS total_fqdns
         FROM available_fqdns
