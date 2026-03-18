@@ -3,7 +3,8 @@
 # sec100 — CI Pipeline
 # Stage 1 (build):  Go multi-platform builds for go-3gpp-scanner
 # Stage 2 (lint):   Python ruff + shellcheck + yamllint
-# Stage 3 (test):   Python import, --help smoke tests, DB schema validation
+# Stage 3 (test):   Go unit tests, Python unit tests (pytest), import checks,
+#                   --help smoke tests, DB schema validation
 # ─────────────────────────────────────────────────────────────────────────────
 
 stages:
@@ -421,4 +422,37 @@ EOF
   rules:
     - changes:
         - epdg/*.py
+        - epdg/requirements.txt
+
+# ── Go unit tests ─────────────────────────────────────────────────────────────
+
+go_unit_tests:
+  stage: test
+  image: golang:1.24-bullseye
+  before_script:
+    - apt-get update && apt-get install -y build-essential
+  script:
+    - cd go-3gpp-scanner
+    - go mod download
+    - go test -v -count=1 ./...
+  rules:
+    - changes:
+        - go-3gpp-scanner/**/*.go
+        - go-3gpp-scanner/go.mod
+        - go-3gpp-scanner/go.sum
+
+# ── Python unit tests (pytest) ────────────────────────────────────────────────
+
+python_unit_tests:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet -r $SCRIPTS_DIR/requirements.txt
+    - pip install --quiet pytest
+  script:
+    - python3 -m pytest $SCRIPTS_DIR/tests/ -v
+  rules:
+    - changes:
+        - epdg/*.py
+        - epdg/tests/*.py
         - epdg/requirements.txt

@@ -1,6 +1,11 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+)
 
 // MCCMNCEntry represents a single entry from the MCC-MNC list
 type MCCMNCEntry struct {
@@ -14,6 +19,50 @@ type MCCMNCEntry struct {
 	Status      string `json:"status"`
 	Bands       string `json:"bands"`
 	Notes       string `json:"notes"`
+}
+
+// Validate checks that the MCCMNCEntry has valid, parseable MCC and MNC values.
+// MCC must be a decimal integer in 1–999.
+// MNC must be a decimal integer in 0–999.
+// Both fields must be non-empty.
+func (e MCCMNCEntry) Validate() error {
+	mccStr := strings.TrimSpace(e.MCC)
+	mncStr := strings.TrimSpace(e.MNC)
+
+	if mccStr == "" {
+		return fmt.Errorf("MCC is empty")
+	}
+	if mncStr == "" {
+		return fmt.Errorf("MNC is empty")
+	}
+
+	mcc, err := strconv.Atoi(mccStr)
+	if err != nil {
+		return fmt.Errorf("MCC %q is not a valid integer: %w", mccStr, err)
+	}
+	if mcc < 1 || mcc > 999 {
+		return fmt.Errorf("MCC %d out of range [1, 999]", mcc)
+	}
+
+	mnc, err := strconv.Atoi(mncStr)
+	if err != nil {
+		return fmt.Errorf("MNC %q is not a valid integer: %w", mncStr, err)
+	}
+	if mnc < 0 || mnc > 999 {
+		return fmt.Errorf("MNC %d out of range [0, 999]", mnc)
+	}
+
+	return nil
+}
+
+// NormalizeOperator returns the operator name with leading/trailing whitespace
+// stripped. If the result is empty, "Unknown" is returned.
+func NormalizeOperator(name string) string {
+	normalized := strings.TrimSpace(name)
+	if normalized == "" {
+		return "Unknown"
+	}
+	return normalized
 }
 
 // DNSResult represents the result of a DNS query

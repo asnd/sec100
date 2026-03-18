@@ -5,10 +5,9 @@ Prints discovered FQDNs to stdout and optionally to a file.
 """
 
 import argparse
+import json
 import sys
 import time
-
-import sys
 from pathlib import Path
 
 import dns.resolver
@@ -17,6 +16,7 @@ from dns.resolver import NXDOMAIN, NoAnswer, Timeout
 
 sys.path.insert(0, str(Path(__file__).parent))
 from subdomains import SUBDOMAINS
+from normalize import normalize_entry
 
 PARENT_DOMAIN = "pub.3gppnetwork.org"
 MCC_MNC_URL = "https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json"
@@ -87,14 +87,18 @@ def main():
 
     found_total = 0
     for i, item in enumerate(mcc_mnc_list, 1):
+        entry = normalize_entry(item)
+        if entry is None:
+            continue
+
         try:
-            mcc = int(item["mcc"])
-            mnc = int(item["mnc"])
+            mcc = int(entry["mcc"])
+            mnc = int(entry["mnc"])
         except (KeyError, ValueError):
             continue
 
-        country  = item.get("countryName", "?")
-        operator = item.get("operator", "?")
+        country  = entry.get("countryName", "?")
+        operator = entry.get("operator", "?")
 
         if i % 200 == 0:
             print(f"[{i}/{total}] {country} — {operator}", file=sys.stderr)

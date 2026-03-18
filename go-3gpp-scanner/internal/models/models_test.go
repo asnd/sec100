@@ -5,6 +5,67 @@ import (
 	"time"
 )
 
+// TestValidateMCCMNCEntryValid checks that well-formed entries pass validation.
+func TestValidateMCCMNCEntryValid(t *testing.T) {
+	cases := []MCCMNCEntry{
+		{MCC: "310", MNC: "260"},
+		{MCC: "001", MNC: "001"},
+		{MCC: "999", MNC: "999"},
+		{MCC: "232", MNC: "000"},
+		{MCC: "1",   MNC: "0"},
+	}
+	for _, e := range cases {
+		if err := e.Validate(); err != nil {
+			t.Errorf("Validate(%+v) unexpected error: %v", e, err)
+		}
+	}
+}
+
+// TestValidateMCCMNCEntryInvalid checks that malformed entries are rejected.
+func TestValidateMCCMNCEntryInvalid(t *testing.T) {
+	cases := []struct {
+		entry MCCMNCEntry
+		desc  string
+	}{
+		{MCCMNCEntry{MCC: "", MNC: "260"}, "empty MCC"},
+		{MCCMNCEntry{MCC: "310", MNC: ""}, "empty MNC"},
+		{MCCMNCEntry{MCC: "abc", MNC: "260"}, "non-numeric MCC"},
+		{MCCMNCEntry{MCC: "310", MNC: "xyz"}, "non-numeric MNC"},
+		{MCCMNCEntry{MCC: "0", MNC: "260"}, "MCC zero"},
+		{MCCMNCEntry{MCC: "-1", MNC: "260"}, "MCC negative"},
+		{MCCMNCEntry{MCC: "1000", MNC: "260"}, "MCC too large"},
+		{MCCMNCEntry{MCC: "310", MNC: "-1"}, "MNC negative"},
+		{MCCMNCEntry{MCC: "310", MNC: "1000"}, "MNC too large"},
+		{MCCMNCEntry{MCC: "  ", MNC: "260"}, "whitespace-only MCC"},
+		{MCCMNCEntry{MCC: "310", MNC: "  "}, "whitespace-only MNC"},
+	}
+	for _, c := range cases {
+		if err := c.entry.Validate(); err == nil {
+			t.Errorf("Validate(%+v) expected error for %s, got nil", c.entry, c.desc)
+		}
+	}
+}
+
+// TestNormalizeOperator verifies operator name cleansing.
+func TestNormalizeOperator(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"T-Mobile US", "T-Mobile US"},
+		{"  Vodafone  ", "Vodafone"},
+		{"\tAT&T\n", "AT&T"},
+		{"", "Unknown"},
+		{"   ", "Unknown"},
+	}
+	for _, c := range cases {
+		got := NormalizeOperator(c.input)
+		if got != c.want {
+			t.Errorf("NormalizeOperator(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
 func TestDNSResult(t *testing.T) {
 	result := DNSResult{
 		FQDN:      "ims.mnc001.mcc310.pub.3gppnetwork.org",

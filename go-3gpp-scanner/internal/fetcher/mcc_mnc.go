@@ -160,3 +160,18 @@ func (f *Fetcher) isCacheFresh(filePath string) bool {
 	age := time.Since(info.ModTime())
 	return age < f.CacheTTL
 }
+
+// FilterValid removes entries with invalid or unparseable MCC/MNC values.
+// It returns the filtered slice and the count of entries that were dropped.
+func FilterValid(entries []models.MCCMNCEntry) ([]models.MCCMNCEntry, int) {
+	valid := make([]models.MCCMNCEntry, 0, len(entries))
+	dropped := 0
+	for _, e := range entries {
+		if err := e.Validate(); err != nil {
+			dropped++
+			continue
+		}
+		valid = append(valid, e)
+	}
+	return valid, dropped
+}

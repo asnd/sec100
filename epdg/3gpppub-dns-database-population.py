@@ -50,6 +50,7 @@ import requests
 from dns.resolver import NXDOMAIN, NoAnswer, Timeout
 
 from subdomains import SUBDOMAINS, fqdn_to_service
+from normalize import normalize_entry
 
 logging.basicConfig(
     level=logging.INFO,
@@ -129,15 +130,19 @@ def resolve_fqdn(fqdn: str, record_type: str, retries: int = 2) -> list[str]:
 
 
 def check_operator(item: dict, subdomains: list[str], record_types: list[str]) -> dict:
+    entry = normalize_entry(item)
+    if entry is None:
+        return {}
+
     try:
-        mcc = int(item["mcc"])
-        mnc = int(item["mnc"])
+        mcc = int(entry["mcc"])
+        mnc = int(entry["mnc"])
     except (KeyError, ValueError):
         return {}
 
-    operator     = item.get("operator", "Unknown")
-    country_name = item.get("countryName", "Unknown")
-    country_code = item.get("countryCode", "")
+    operator     = entry.get("operator", "Unknown")
+    country_name = entry.get("countryName", "Unknown")
+    country_code = entry.get("countryCode", "")
 
     found = []
     for subdomain in subdomains:

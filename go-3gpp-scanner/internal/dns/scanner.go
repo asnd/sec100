@@ -121,6 +121,13 @@ func (s *Scanner) worker(ctx context.Context, jobs <-chan job, results *[]models
 
 // resolveFQDN resolves a single FQDN
 func (s *Scanner) resolveFQDN(entry models.MCCMNCEntry, subdomain string) *models.DNSResult {
+	if err := entry.Validate(); err != nil {
+		if s.config.Verbose {
+			fmt.Printf("Skipping invalid entry (MCC=%q MNC=%q): %v\n", entry.MCC, entry.MNC, err)
+		}
+		return nil
+	}
+
 	mcc, _ := strconv.Atoi(entry.MCC)
 	mnc, _ := strconv.Atoi(entry.MNC)
 
