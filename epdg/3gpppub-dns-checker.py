@@ -1,35 +1,113 @@
-import dns.resolver
+#!/usr/bin/env python3
+"""
+3GPP Public Domain DNS Checker (lightweight, no database)
+Prints discovered FQDNs to stdout and optionally to a file.
+"""
+
+import argparse
+import sys
 import time
+
+import dns.resolver
 import requests
-from dns.resolver import NXDOMAIN
+from dns.resolver import NXDOMAIN, NoAnswer, Timeout
 
-def check_dns_records(mnc, mcc, parent_domain, subdomains):
+PARENT_DOMAIN = "pub.3gppnetwork.org"
+SUBDOMAINS = ["ims", "epdg.epc", "bsf", "gan", "xcap.ims"]
+MCC_MNC_URL = "https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json"
+
+
+def resolve(fqdn: str, rtype: str) -> list[str]:
+    try:
+        answers = dns.resolver.resolve(fqdn, rtype)
+        return [r.address for r in answers]
+    except (NXDOMAIN, NoAnswer, Timeout):
+        return []
+    except Exception:
+        return []
+
+
+def check_operator(mnc: int, mcc: int, subdomains: list[str], ipv6: bool) -> list[tuple]:
+    """Return list of (fqdn, record_type, ips) for found records."""
+    found = []
+    rtypes = ["A", "AAAA"] if ipv6 else ["A"]
     for subdomain in subdomains:
-        fqdn = f"{subdomain}.mnc{mnc:03d}.mcc{mcc:03d}.{parent_domain}"
-        try:
-            answers = dns.resolver.resolve(fqdn, 'A')
-            if answers:
-                print(f"Found A record for {fqdn}")
-        except NXDOMAIN:
-            pass
-        except Exception:
-            pass
+        fqdn = f"{subdomain}.mnc{mnc:03d}.mcc{mcc:03d}.{PARENT_DOMAIN}"
+        for rtype in rtypes:
+            ips = resolve(fqdn, rtype)
+            if ips:
+                found.append((fqdn, rtype, ips))
+    return found
 
-        time.sleep(0.5)  # Add a 0.5-second pause
 
 def main():
-    parent_domain = "pub.3gppnetwork.org"
-    subdomains = ["ims", "epdg.epc", "bsf", "gan", "xcap.ims"]
+    parser = argparse.ArgumentParser(
+        description="Check 3GPP public DNS records for all known MCC/MNC pairs."
+    )
+    parser.add_argument("--output", "-o", help="Write results to this file")
+    parser.add_argument("--ipv6", action="store_true", help="Also check AAAA records")
+    parser.add_argument(
+        "--subdomains", nargs="+", default=SUBDOMAINS,
+        help="Subdomains to probe"
+    )
+    parser.add_argument(
+        "--source", default=MCC_MNC_URL,
+        help="MCC/MNC list URL or local JSON path"
+    )
+    parser.add_argument(
+        "--delay", type=float, default=0.0,
+        help="Seconds to sleep between operators (default: 0)"
+    )
+    args = parser.parse_args()
 
-    # Fetch MCC-MNC pairs from JSON file
-    response = requests.get('https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json')
-    mcc_mnc_list = response.json()
+    out = open(args.output, "w") if args.output else None
 
-    for item in mcc_mnc_list:
-        mcc = int(item['mcc'])
-        mnc = int(item['mnc'])
-        print(item['countryName'], " ", item['operator'])
-        check_dns_records(mnc, mcc, parent_domain, subdomains)
+    def emit(line: str):
+        print(line)
+        if out:
+            out.write(line + "\n")
+
+    print(f"Fetching MCC/MNC list from {args.source} ...", file=sys.stderr)
+    if args.source.startswith("http"):
+        resp = requests.get(args.source, timeout=30)
+        resp.raise_for_status()
+        mcc_mnc_list = resp.json()
+    else:
+        import json
+        with open(args.source) as f:
+            mcc_mnc_list = json.load(f)
+
+    total = len(mcc_mnc_list)
+    print(f"Loaded {total} entries. Scanning ...\n", file=sys.stderr)
+
+    found_total = 0
+    for i, item in enumerate(mcc_mnc_list, 1):
+        try:
+            mcc = int(item["mcc"])
+            mnc = int(item["mnc"])
+        except (KeyError, ValueError):
+            continue
+
+        country  = item.get("countryName", "?")
+        operator = item.get("operator", "?")
+
+        if i % 200 == 0:
+            print(f"[{i}/{total}] {country} — {operator}", file=sys.stderr)
+
+        results = check_operator(mnc, mcc, args.subdomains, args.ipv6)
+        for fqdn, rtype, ips in results:
+            line = f"{rtype}\t{fqdn}\t{','.join(ips)}\t{country}\t{operator}"
+            emit(line)
+            found_total += 1
+
+        if args.delay:
+            time.sleep(args.delay)
+
+    print(f"\nDone. {found_total} records found.", file=sys.stderr)
+    if out:
+        out.close()
+        print(f"Results written to {args.output}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

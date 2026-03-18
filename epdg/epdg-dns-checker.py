@@ -13,14 +13,14 @@ def check_dns_records(mnc, mcc):
         pass
     except Exception:
         pass
-    
+
     time.sleep(0.5)  # Add a 0.5-second pause
-    
+
 def main():
     # Fetch MCC-MNC pairs from JSON file
     response = requests.get('https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json')
     mcc_mnc_list = response.json()
-    
+
     for item in mcc_mnc_list:
         mcc = int(item['mcc'])
         mnc = int(item['mnc'])

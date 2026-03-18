@@ -1,19 +1,31 @@
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# sec100 — CI Pipeline
+# Stage 1 (build):  Go multi-platform builds for go-3gpp-scanner
+# Stage 2 (lint):   Python ruff + shellcheck + yamllint
+# Stage 3 (test):   Python import, --help smoke tests, DB schema validation
+# ─────────────────────────────────────────────────────────────────────────────
+
 stages:
   - build
+  - lint
+  - test
 
 variables:
   GO_VERSION: "1.24"
   DOCKER_DRIVER: overlay2
   CGO_ENABLED: "1"
+  PYTHON_IMAGE: "python:3.11-slim"
+  SCRIPTS_DIR: "epdg"
 
-# Default image for all jobs
+# ── Go builds ─────────────────────────────────────────────────────────────────
+
 image: golang:1.24-bullseye
 
 before_script:
   - echo "Go version:" && go version
   - echo "Working in:" && pwd
 
-# Build for Linux x86_64
 build:linux-amd64:
   stage: build
   before_script:
@@ -35,7 +47,6 @@ build:linux-amd64:
     - main
     - merge_requests
 
-# Build for Linux ARM64
 build:linux-arm64:
   stage: build
   before_script:
@@ -57,7 +68,6 @@ build:linux-arm64:
     - main
     - merge_requests
 
-# Build for Linux ARM (32-bit)
 build:linux-arm:
   stage: build
   before_script:
@@ -79,7 +89,6 @@ build:linux-arm:
     - main
     - merge_requests
 
-# Build for macOS x86_64
 build:macos-amd64:
   stage: build
   image: golang:1.24-alpine
@@ -102,7 +111,6 @@ build:macos-amd64:
     - main
     - merge_requests
 
-# Build for macOS ARM64
 build:macos-arm64:
   stage: build
   image: golang:1.24-alpine
@@ -125,7 +133,6 @@ build:macos-arm64:
     - main
     - merge_requests
 
-# Build for Windows x86_64
 build:windows-amd64:
   stage: build
   before_script:
@@ -147,7 +154,6 @@ build:windows-amd64:
     - main
     - merge_requests
 
-# Build all platforms in single job
 build:all:
   stage: build
   before_script:
@@ -164,7 +170,6 @@ build:all:
   only:
     - main
 
-# Build static binary (no CGO)
 build:static:
   stage: build
   script:
@@ -183,3 +188,129 @@ build:static:
   only:
     - main
     - merge_requests
+
+# ── Python lint ───────────────────────────────────────────────────────────────
+
+python_syntax:
+  stage: lint
+  image: $PYTHON_IMAGE
+  before_script:
+    - echo "Python syntax check"
+  script:
+    - |
+      for f in $SCRIPTS_DIR/*.py; do
+        python3 -m py_compile "$f" && echo "OK  $f" || { echo "FAIL $f"; exit 1; }
+      done
+  rules:
+    - changes:
+        - epdg/*.py
+
+python_lint:
+  stage: lint
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet ruff
+  script:
+    - ruff check --select E,W,F --ignore E501,E402,F401,F811 $SCRIPTS_DIR/
+  rules:
+    - changes:
+        - epdg/*.py
+
+bash_lint:
+  stage: lint
+  image: koalaman/shellcheck-alpine:stable
+  before_script: []
+  script:
+    - shellcheck $SCRIPTS_DIR/*.sh
+  rules:
+    - changes:
+        - epdg/*.sh
+
+yaml_lint:
+  stage: lint
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet yamllint
+  script:
+    - yamllint .gitlab-ci.yml
+  rules:
+    - changes:
+        - "*.yml"
+        - "*.yaml"
+
+# ── Python tests ──────────────────────────────────────────────────────────────
+
+python_imports:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet -r $SCRIPTS_DIR/requirements.txt
+  script:
+    - python3 -c "import dns.resolver, requests, sqlite3"
+    - python3 -c "import pandas, plotly.express"
+    - python3 -c "import concurrent.futures, argparse, json, logging"
+    - |
+      for f in $SCRIPTS_DIR/3gpppub-*.py; do
+        python3 -c "
+import ast, sys
+with open('$f') as fh:
+    tree = ast.parse(fh.read())
+print('AST OK:', '$f')
+        "
+      done
+  rules:
+    - changes:
+        - epdg/*.py
+        - epdg/requirements.txt
+
+cli_help:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet -r $SCRIPTS_DIR/requirements.txt
+  script:
+    - python3 $SCRIPTS_DIR/3gpppub-dns-checker.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-dns-database-population.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-5g-discovery.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-asn-enricher.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-naptr-discovery.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-diff.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-grx-access.py --help
+  rules:
+    - changes:
+        - epdg/*.py
+        - epdg/requirements.txt
+
+db_schema:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet -r $SCRIPTS_DIR/requirements.txt
+  script:
+    - python3 - << 'EOF'
+import sqlite3, sys, os
+from importlib.util import spec_from_file_location, module_from_spec
+
+schemas = {
+    'population': ('epdg/3gpppub-dns-database-population.py', 'SCHEMA'),
+    '5g':         ('epdg/3gpppub-5g-discovery.py',            'SCHEMA_5G'),
+    'naptr':      ('epdg/3gpppub-naptr-discovery.py',         'SCHEMA_NAPTR'),
+    'diff':       ('epdg/3gpppub-diff.py',                    'SCHEMA_DIFF'),
+}
+for name, (path, attr) in schemas.items():
+    spec = spec_from_file_location(name, path)
+    mod  = module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    conn = sqlite3.connect(':memory:')
+    conn.executescript(getattr(mod, attr))
+    conn.commit()
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    ).fetchall()]
+    print(f"  {name:<12} tables: {tables}")
+    conn.close()
+print('All schemas OK.')
+EOF
+  rules:
+    - changes:
+        - epdg/*.py
