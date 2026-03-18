@@ -60,18 +60,13 @@ def validate_mcc_mnc(mcc_str: str | None, mnc_str: str | None) -> tuple[int, int
         If either value is ``None``, empty, non-numeric, or outside its
         valid range.
     """
-    if not mcc_str or not str(mcc_str).strip():
+    if mcc_str is None or str(mcc_str).strip() == "":
         raise ValueError("MCC is empty or None")
-    if not mnc_str and mnc_str != 0 and str(mnc_str).strip() == "":
+    if mnc_str is None or str(mnc_str).strip() == "":
         raise ValueError("MNC is empty or None")
 
     mcc_s = str(mcc_str).strip()
     mnc_s = str(mnc_str).strip()
-
-    if not mcc_s:
-        raise ValueError("MCC is empty or whitespace-only")
-    if not mnc_s:
-        raise ValueError("MNC is empty or whitespace-only")
 
     try:
         mcc = int(mcc_s)
@@ -96,6 +91,17 @@ def validate_mcc_mnc(mcc_str: str | None, mnc_str: str | None) -> tuple[int, int
 # Operator name normalisation
 # ---------------------------------------------------------------------------
 
+def _normalize_text(value: str | None) -> str:
+    """Strip whitespace and NFC-normalise *value*.
+
+    Returns the empty string when *value* is ``None`` or whitespace-only.
+    This is the shared implementation used by :func:`normalize_operator`.
+    """
+    if value is None:
+        return ""
+    return unicodedata.normalize("NFC", str(value)).strip()
+
+
 def normalize_operator(name: str | None) -> str:
     """Return a normalised operator name.
 
@@ -110,9 +116,7 @@ def normalize_operator(name: str | None) -> str:
     name:
         Raw operator name string (may contain extra whitespace or be ``None``).
     """
-    if name is None:
-        return "Unknown"
-    cleaned = unicodedata.normalize("NFC", str(name)).strip()
+    cleaned = _normalize_text(name)
     return cleaned if cleaned else "Unknown"
 
 
@@ -150,6 +154,6 @@ def normalize_entry(item: dict) -> dict | None:
         "mcc":         str(mcc),
         "mnc":         str(mnc),
         "operator":    normalize_operator(item.get("operator", "")),
-        "countryName": normalize_operator(item.get("countryName", "")),
+        "countryName": _normalize_text(item.get("countryName", "")) or "Unknown",
         "countryCode": str(item.get("countryCode") or "").strip().upper(),
     }

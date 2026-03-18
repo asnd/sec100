@@ -78,7 +78,6 @@ def main():
         resp.raise_for_status()
         mcc_mnc_list = resp.json()
     else:
-        import json
         with open(args.source) as f:
             mcc_mnc_list = json.load(f)
 
