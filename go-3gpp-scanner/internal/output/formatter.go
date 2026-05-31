@@ -9,6 +9,8 @@ import (
 	"3gpp-scanner/internal/models"
 )
 
+var dnsResultCSVHeader = []string{"FQDN", "IPs", "Subdomain", "ParentDomain", "DomainProfile", "ServiceClass", "Standards", "SecurityFocus", "MNC", "MCC", "Operator", "Timestamp"}
+
 // ExportJSON exports data to JSON format
 func ExportJSON(data interface{}, filePath string) error {
 	file, err := os.Create(filePath)
@@ -39,8 +41,7 @@ func ExportResultsCSV(results []models.DNSResult, filePath string) error {
 	defer writer.Flush()
 
 	// Write header
-	header := []string{"FQDN", "IPs", "Subdomain", "ParentDomain", "DomainProfile", "ServiceClass", "Standards", "SecurityFocus", "MNC", "MCC", "Operator", "Timestamp"}
-	if err := writer.Write(header); err != nil {
+	if err := writer.Write(dnsResultCSVHeader); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
 

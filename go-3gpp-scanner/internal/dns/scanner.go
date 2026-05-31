@@ -210,6 +210,69 @@ type ServiceClassification struct {
 	SecurityFocus string
 }
 
+var serviceClassificationOverrides = map[string]ServiceClassification{
+	"epdg.epc": {
+		ServiceClass:  "VoWiFi ingress",
+		Standards:     "3GPP TS 23.003; GSMA IR.51; GSMA IR.61",
+		SecurityFocus: "Wi-Fi calling edge and IPsec gateway exposure",
+	},
+	"ims": {
+		ServiceClass:  "IMS/VoLTE",
+		Standards:     "3GPP TS 23.003; GSMA IR.92",
+		SecurityFocus: "Voice and messaging control-plane exposure",
+	},
+	"bsf": {
+		ServiceClass:  "Bootstrapping/authentication",
+		Standards:     "3GPP TS 23.003; 3GPP TS 33.220",
+		SecurityFocus: "Authentication helper service exposure",
+	},
+	"gan": {
+		ServiceClass:  "Generic Access Network",
+		Standards:     "3GPP TS 23.003; 3GPP TS 43.318",
+		SecurityFocus: "Legacy unlicensed mobile access exposure",
+	},
+	"xcap.ims": {
+		ServiceClass:  "IMS configuration",
+		Standards:     "3GPP TS 23.003; 3GPP TS 24.623",
+		SecurityFocus: "Subscriber service configuration exposure",
+	},
+	"sepp.5gc": {
+		ServiceClass:  "5G roaming security edge",
+		Standards:     "3GPP TS 23.003; 3GPP TS 33.501; GSMA FS.34; GSMA IR.88",
+		SecurityFocus: "N32 interconnect and roaming security boundary exposure",
+	},
+	"nrf.5gc": {
+		ServiceClass:  "5G service registry",
+		Standards:     "3GPP TS 23.003; 3GPP TS 29.510",
+		SecurityFocus: "5G service discovery exposure",
+	},
+	"nssf.5gc": {
+		ServiceClass:  "5G slice selection",
+		Standards:     "3GPP TS 23.003; 3GPP TS 29.531",
+		SecurityFocus: "Network slice selection exposure",
+	},
+	"ausf.5gc": {
+		ServiceClass:  "5G subscriber authentication/data",
+		Standards:     "3GPP TS 23.003; 3GPP TS 33.501",
+		SecurityFocus: "Subscriber identity and authentication service exposure",
+	},
+	"udm.5gc": {
+		ServiceClass:  "5G subscriber authentication/data",
+		Standards:     "3GPP TS 23.003; 3GPP TS 33.501",
+		SecurityFocus: "Subscriber identity and authentication service exposure",
+	},
+	"amf.5gc": {
+		ServiceClass:  "5G mobility/session control",
+		Standards:     "3GPP TS 23.003",
+		SecurityFocus: "5G control-plane function exposure",
+	},
+	"smf.5gc": {
+		ServiceClass:  "5G mobility/session control",
+		Standards:     "3GPP TS 23.003",
+		SecurityFocus: "5G control-plane function exposure",
+	},
+}
+
 // ClassifyService maps known 3GPP/GSMA service names to defensive security context.
 func ClassifyService(subdomain, parentDomain string) ServiceClassification {
 	classification := ServiceClassification{
@@ -227,47 +290,10 @@ func ClassifyService(subdomain, parentDomain string) ServiceClassification {
 		}
 	}
 
-	switch subdomain {
-	case "epdg.epc":
-		classification.ServiceClass = "VoWiFi ingress"
-		classification.Standards = "3GPP TS 23.003; GSMA IR.51; GSMA IR.61"
-		classification.SecurityFocus = "Wi-Fi calling edge and IPsec gateway exposure"
-	case "ims":
-		classification.ServiceClass = "IMS/VoLTE"
-		classification.Standards = "3GPP TS 23.003; GSMA IR.92"
-		classification.SecurityFocus = "Voice and messaging control-plane exposure"
-	case "bsf":
-		classification.ServiceClass = "Bootstrapping/authentication"
-		classification.Standards = "3GPP TS 23.003; 3GPP TS 33.220"
-		classification.SecurityFocus = "Authentication helper service exposure"
-	case "gan":
-		classification.ServiceClass = "Generic Access Network"
-		classification.Standards = "3GPP TS 23.003; 3GPP TS 43.318"
-		classification.SecurityFocus = "Legacy unlicensed mobile access exposure"
-	case "xcap.ims":
-		classification.ServiceClass = "IMS configuration"
-		classification.Standards = "3GPP TS 23.003; 3GPP TS 24.623"
-		classification.SecurityFocus = "Subscriber service configuration exposure"
-	case "sepp.5gc":
-		classification.ServiceClass = "5G roaming security edge"
-		classification.Standards = "3GPP TS 23.003; 3GPP TS 33.501; GSMA FS.34; GSMA IR.88"
-		classification.SecurityFocus = "N32 interconnect and roaming security boundary exposure"
-	case "nrf.5gc":
-		classification.ServiceClass = "5G service registry"
-		classification.Standards = "3GPP TS 23.003; 3GPP TS 29.510"
-		classification.SecurityFocus = "5G service discovery exposure"
-	case "nssf.5gc":
-		classification.ServiceClass = "5G slice selection"
-		classification.Standards = "3GPP TS 23.003; 3GPP TS 29.531"
-		classification.SecurityFocus = "Network slice selection exposure"
-	case "ausf.5gc", "udm.5gc":
-		classification.ServiceClass = "5G subscriber authentication/data"
-		classification.Standards = "3GPP TS 23.003; 3GPP TS 33.501"
-		classification.SecurityFocus = "Subscriber identity and authentication service exposure"
-	case "amf.5gc", "smf.5gc":
-		classification.ServiceClass = "5G mobility/session control"
-		classification.Standards = "3GPP TS 23.003"
-		classification.SecurityFocus = "5G control-plane function exposure"
+	if override, ok := serviceClassificationOverrides[subdomain]; ok {
+		classification.ServiceClass = override.ServiceClass
+		classification.Standards = override.Standards
+		classification.SecurityFocus = override.SecurityFocus
 	}
 
 	return classification

@@ -471,12 +471,8 @@ This toolkit performs **authorized reconnaissance** on mobile operator infrastru
 - ✅ Educational purposes and infrastructure mapping
 - ✅ Standards-aware context for 3GPP TS 23.003, 3GPP TS 33.501, and GSMA roaming/security references
 
-Suggested future security features:
-- DNSSEC validation status for discovered telecom records
-- AAAA/IPv6 enumeration and dual-stack exposure comparison
-- Certificate transparency correlation for discovered FQDNs
-- Passive ASN/GeoIP enrichment for GRX/IPX and public Internet boundary review
-- ETSI/NFV service metadata mapping for virtualized core deployments
+For future security ideas such as DNSSEC, IPv6/AAAA, certificate transparency,
+ASN/GeoIP, and ETSI/NFV metadata enrichment, see the contribution roadmap below.
 
 **Use responsibly** and only for:
 - Authorized security testing
@@ -537,6 +533,8 @@ Improvements welcome! Areas for contribution:
 - [x] Security profiles and service classification metadata
 - [ ] DNSSEC validation status
 - [ ] Certificate transparency enrichment
+- [ ] Passive ASN/GeoIP enrichment for GRX/IPX and public Internet boundary review
+- [ ] ETSI/NFV service metadata mapping for virtualized core deployments
 - [ ] Additional output formats
 - [x] Built-in help with usage examples
 - [x] Flag validation with helpful error messages

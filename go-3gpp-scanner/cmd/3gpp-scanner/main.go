@@ -279,6 +279,9 @@ type scanTarget struct {
 
 // scanModeAliases maps short CLI mode names to their full DNS subdomain labels.
 var scanModeAliases = map[string]string{
+	"ims":  "ims",
+	"bsf":  "bsf",
+	"gan":  "gan",
 	"epdg": "epdg.epc",
 	"xcap": "xcap.ims",
 	"nrf":  "nrf.5gc",

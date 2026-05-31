@@ -148,7 +148,13 @@ func TestScanTargets(t *testing.T) {
 				"gan",
 				"xcap.ims",
 			},
-			expectedSuffix: map[string]string{"epdg.epc": "pub.3gppnetwork.org"},
+			expectedSuffix: map[string]string{
+				"ims":      "pub.3gppnetwork.org",
+				"epdg.epc": "pub.3gppnetwork.org",
+				"bsf":      "pub.3gppnetwork.org",
+				"gan":      "pub.3gppnetwork.org",
+				"xcap.ims": "pub.3gppnetwork.org",
+			},
 		},
 		{
 			name:           "5g sepp target",
