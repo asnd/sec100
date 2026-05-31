@@ -369,12 +369,13 @@ func targetsForProfile(profile string) []scanTarget {
 func customTargets(profile, customSubdomains string) []scanTarget {
 	parts := strings.Split(customSubdomains, ",")
 	targets := make([]scanTarget, 0, len(parts))
+	profileTargets := targetsForProfile(profile)
 	for _, part := range parts {
 		subdomain := strings.TrimSpace(part)
 		if subdomain == "" {
 			continue
 		}
-		if target, ok := findTarget(targetsForProfile(profile), subdomain); ok {
+		if target, ok := findTarget(profileTargets, subdomain); ok {
 			targets = append(targets, target)
 			continue
 		}

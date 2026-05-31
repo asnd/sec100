@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,6 +91,7 @@ func TestClassifyService(t *testing.T) {
 		expectedProfile       string
 		expectedServiceClass  string
 		expectedSecurityFocus string
+		expectedStandard      string
 	}{
 		{
 			name:                  "epdg public classification",
@@ -98,6 +100,7 @@ func TestClassifyService(t *testing.T) {
 			expectedProfile:       "3gpp-public",
 			expectedServiceClass:  "VoWiFi ingress",
 			expectedSecurityFocus: "Wi-Fi calling edge and IPsec gateway exposure",
+			expectedStandard:      "GSMA IR.51",
 		},
 		{
 			name:                  "sepp 5g classification",
@@ -106,6 +109,7 @@ func TestClassifyService(t *testing.T) {
 			expectedProfile:       "3gpp-5g",
 			expectedServiceClass:  "5G roaming security edge",
 			expectedSecurityFocus: "N32 interconnect and roaming security boundary exposure",
+			expectedStandard:      "GSMA IR.88",
 		},
 	}
 
@@ -121,8 +125,8 @@ func TestClassifyService(t *testing.T) {
 			if result.SecurityFocus != tt.expectedSecurityFocus {
 				t.Errorf("SecurityFocus = %s, expected %s", result.SecurityFocus, tt.expectedSecurityFocus)
 			}
-			if result.Standards == "" {
-				t.Errorf("expected standards to be set")
+			if !strings.Contains(result.Standards, tt.expectedStandard) {
+				t.Errorf("Standards = %s, expected to contain %s", result.Standards, tt.expectedStandard)
 			}
 		})
 	}
