@@ -212,20 +212,19 @@ type ServiceClassification struct {
 
 // ClassifyService maps known 3GPP/GSMA service names to defensive security context.
 func ClassifyService(subdomain, parentDomain string) ServiceClassification {
-	domainProfile := "3gpp-public"
-	standards := "3GPP TS 23.003"
-	securityFocus := "Public DNS exposure inventory"
-	if parentDomain == "3gppnetwork.org" {
-		domainProfile = "3gpp-5g"
-		standards = "3GPP TS 23.003; 3GPP TS 33.501"
-		securityFocus = "5G core service exposure inventory"
-	}
-
 	classification := ServiceClassification{
-		DomainProfile: domainProfile,
+		DomainProfile: "3gpp-public",
 		ServiceClass:  "Telecom DNS service",
-		Standards:     standards,
-		SecurityFocus: securityFocus,
+		Standards:     "3GPP TS 23.003",
+		SecurityFocus: "Public DNS exposure inventory",
+	}
+	if parentDomain == "3gppnetwork.org" {
+		classification = ServiceClassification{
+			DomainProfile: "3gpp-5g",
+			ServiceClass:  "Telecom DNS service",
+			Standards:     "3GPP TS 23.003; 3GPP TS 33.501",
+			SecurityFocus: "5G core service exposure inventory",
+		}
 	}
 
 	switch subdomain {

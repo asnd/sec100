@@ -277,6 +277,7 @@ type scanTarget struct {
 	parentDomain string
 }
 
+// scanModeAliases maps short CLI mode names to their full DNS subdomain labels.
 var scanModeAliases = map[string]string{
 	"epdg": "epdg.epc",
 	"xcap": "xcap.ims",
@@ -359,7 +360,8 @@ func targetsForProfile(profile string) []scanTarget {
 	case "security":
 		return securityTargets
 	case "all":
-		targets := append([]scanTarget{}, publicTargets...)
+		targets := make([]scanTarget, 0, len(publicTargets)+len(fiveGTargets))
+		targets = append(targets, publicTargets...)
 		return append(targets, fiveGTargets...)
 	default:
 		return nil

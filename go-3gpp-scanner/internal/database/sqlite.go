@@ -112,7 +112,7 @@ func (db *DB) InsertResults(results []models.DNSResult) error {
 			result.Timestamp,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert security metadata: %w", err)
+			return fmt.Errorf("failed to insert security metadata for %s: %w", result.FQDN, err)
 		}
 	}
 
