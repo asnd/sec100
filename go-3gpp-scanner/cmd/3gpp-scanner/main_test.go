@@ -17,6 +17,7 @@ func TestValidateScanFlags(t *testing.T) {
 			setupFlags: func() {
 				scanMode = "custom"
 				scanSubdomains = ""
+				scanProfile = "public"
 				scanConcurrency = 10
 				scanDelay = 500
 			},
@@ -28,6 +29,7 @@ func TestValidateScanFlags(t *testing.T) {
 			setupFlags: func() {
 				scanMode = "invalid"
 				scanSubdomains = ""
+				scanProfile = "public"
 				scanConcurrency = 10
 				scanDelay = 500
 			},
@@ -39,6 +41,7 @@ func TestValidateScanFlags(t *testing.T) {
 			setupFlags: func() {
 				scanMode = "all"
 				scanSubdomains = ""
+				scanProfile = "public"
 				scanConcurrency = 0
 				scanDelay = 500
 			},
@@ -50,6 +53,7 @@ func TestValidateScanFlags(t *testing.T) {
 			setupFlags: func() {
 				scanMode = "all"
 				scanSubdomains = ""
+				scanProfile = "public"
 				scanConcurrency = 10
 				scanDelay = -100
 			},
@@ -57,10 +61,34 @@ func TestValidateScanFlags(t *testing.T) {
 			errorMsg:    "--delay cannot be negative",
 		},
 		{
+			name: "invalid profile",
+			setupFlags: func() {
+				scanMode = "all"
+				scanSubdomains = ""
+				scanProfile = "invalid"
+				scanConcurrency = 10
+				scanDelay = 500
+			},
+			expectError: true,
+			errorMsg:    "invalid profile",
+		},
+		{
+			name: "valid 5g sepp mode",
+			setupFlags: func() {
+				scanMode = "sepp"
+				scanSubdomains = ""
+				scanProfile = "5g"
+				scanConcurrency = 10
+				scanDelay = 500
+			},
+			expectError: false,
+		},
+		{
 			name: "valid epdg mode",
 			setupFlags: func() {
 				scanMode = "epdg"
 				scanSubdomains = ""
+				scanProfile = "public"
 				scanConcurrency = 10
 				scanDelay = 500
 			},
@@ -71,6 +99,7 @@ func TestValidateScanFlags(t *testing.T) {
 			setupFlags: func() {
 				scanMode = "custom"
 				scanSubdomains = "ims,bsf"
+				scanProfile = "public"
 				scanConcurrency = 10
 				scanDelay = 500
 			},
@@ -92,6 +121,81 @@ func TestValidateScanFlags(t *testing.T) {
 			if tt.expectError && err != nil && tt.errorMsg != "" {
 				if !contains(err.Error(), tt.errorMsg) {
 					t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+				}
+			}
+		})
+	}
+}
+
+func TestScanTargets(t *testing.T) {
+	tests := []struct {
+		name             string
+		profile          string
+		mode             string
+		customSubdomains string
+		expected         []string
+		expectedSuffix   map[string]string
+		expectError      bool
+	}{
+		{
+			name:    "public all profile",
+			profile: "public",
+			mode:    "all",
+			expected: []string{
+				"ims",
+				"epdg.epc",
+				"bsf",
+				"gan",
+				"xcap.ims",
+			},
+			expectedSuffix: map[string]string{"epdg.epc": "pub.3gppnetwork.org"},
+		},
+		{
+			name:           "5g sepp target",
+			profile:        "5g",
+			mode:           "sepp",
+			expected:       []string{"sepp.5gc"},
+			expectedSuffix: map[string]string{"sepp.5gc": "3gppnetwork.org"},
+		},
+		{
+			name:             "custom 5g suffix inference",
+			profile:          "public",
+			mode:             "custom",
+			customSubdomains: "custom.5gc",
+			expected:         []string{"custom.5gc"},
+			expectedSuffix:   map[string]string{"custom.5gc": "3gppnetwork.org"},
+		},
+		{
+			name:        "unsupported mode for profile",
+			profile:     "public",
+			mode:        "sepp",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			subdomains, suffixes, err := scanTargets(tt.profile, tt.mode, tt.customSubdomains)
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("expected error but got none")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(subdomains) != len(tt.expected) {
+				t.Fatalf("expected %d subdomains, got %d", len(tt.expected), len(subdomains))
+			}
+			for i, expected := range tt.expected {
+				if subdomains[i] != expected {
+					t.Errorf("subdomain[%d] = %s, expected %s", i, subdomains[i], expected)
+				}
+			}
+			for subdomain, expectedSuffix := range tt.expectedSuffix {
+				if suffixes[subdomain] != expectedSuffix {
+					t.Errorf("suffix for %s = %s, expected %s", subdomain, suffixes[subdomain], expectedSuffix)
 				}
 			}
 		})

@@ -39,7 +39,7 @@ func ExportResultsCSV(results []models.DNSResult, filePath string) error {
 	defer writer.Flush()
 
 	// Write header
-	header := []string{"FQDN", "IPs", "Subdomain", "MNC", "MCC", "Operator", "Timestamp"}
+	header := []string{"FQDN", "IPs", "Subdomain", "ParentDomain", "DomainProfile", "ServiceClass", "Standards", "SecurityFocus", "MNC", "MCC", "Operator", "Timestamp"}
 	if err := writer.Write(header); err != nil {
 		return fmt.Errorf("failed to write header: %w", err)
 	}
@@ -58,6 +58,11 @@ func ExportResultsCSV(results []models.DNSResult, filePath string) error {
 			result.FQDN,
 			ips,
 			result.Subdomain,
+			result.ParentDomain,
+			result.DomainProfile,
+			result.ServiceClass,
+			result.Standards,
+			result.SecurityFocus,
 			fmt.Sprintf("%d", result.MNC),
 			fmt.Sprintf("%d", result.MCC),
 			result.Operator,
@@ -135,6 +140,9 @@ func ExportFQDNList(results []models.DNSResult, filePath string) error {
 func PrintResults(results []models.DNSResult) {
 	for _, result := range results {
 		fmt.Printf("Found A record for %s\n", result.FQDN)
+		if result.ServiceClass != "" {
+			fmt.Printf("  Service: %s (%s)\n", result.ServiceClass, result.DomainProfile)
+		}
 		if len(result.IPs) > 0 {
 			for _, ip := range result.IPs {
 				fmt.Printf("  IP: %s\n", ip)

@@ -124,21 +124,29 @@ func (s *Scanner) resolveFQDN(entry models.MCCMNCEntry, subdomain string) *model
 	mcc, _ := strconv.Atoi(entry.MCC)
 	mnc, _ := strconv.Atoi(entry.MNC)
 
-	fqdn := fmt.Sprintf("%s.mnc%03d.mcc%03d.%s", subdomain, mnc, mcc, s.config.ParentDomain)
+	parentDomain := s.parentDomainFor(subdomain)
+	fqdn := BuildFQDN(subdomain, mnc, mcc, parentDomain)
 
 	ips, err := s.resolveA(fqdn)
 	if err != nil || len(ips) == 0 {
 		return nil
 	}
 
+	classification := ClassifyService(subdomain, parentDomain)
+
 	return &models.DNSResult{
-		FQDN:      fqdn,
-		IPs:       ips,
-		Subdomain: subdomain,
-		MNC:       mnc,
-		MCC:       mcc,
-		Operator:  entry.Operator,
-		Timestamp: time.Now(),
+		FQDN:          fqdn,
+		IPs:           ips,
+		Subdomain:     subdomain,
+		ParentDomain:  parentDomain,
+		DomainProfile: classification.DomainProfile,
+		ServiceClass:  classification.ServiceClass,
+		Standards:     classification.Standards,
+		SecurityFocus: classification.SecurityFocus,
+		MNC:           mnc,
+		MCC:           mcc,
+		Operator:      entry.Operator,
+		Timestamp:     time.Now(),
 	}
 }
 
@@ -183,6 +191,84 @@ func (s *Scanner) resolveA(fqdn string) ([]string, error) {
 // BuildFQDN constructs a 3GPP FQDN from components
 func BuildFQDN(subdomain string, mnc, mcc int, parentDomain string) string {
 	return fmt.Sprintf("%s.mnc%03d.mcc%03d.%s", subdomain, mnc, mcc, parentDomain)
+}
+
+func (s *Scanner) parentDomainFor(subdomain string) string {
+	if s.config.DomainSuffixes != nil {
+		if parentDomain, ok := s.config.DomainSuffixes[subdomain]; ok && parentDomain != "" {
+			return parentDomain
+		}
+	}
+	return s.config.ParentDomain
+}
+
+// ServiceClassification captures security context for a 3GPP service FQDN.
+type ServiceClassification struct {
+	DomainProfile string
+	ServiceClass  string
+	Standards     string
+	SecurityFocus string
+}
+
+// ClassifyService maps known 3GPP/GSMA service names to defensive security context.
+func ClassifyService(subdomain, parentDomain string) ServiceClassification {
+	classification := ServiceClassification{
+		DomainProfile: "3gpp-public",
+		ServiceClass:  "Telecom DNS service",
+		Standards:     "3GPP TS 23.003",
+		SecurityFocus: "Public DNS exposure inventory",
+	}
+
+	if parentDomain == "3gppnetwork.org" {
+		classification.DomainProfile = "3gpp-5g"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 33.501"
+		classification.SecurityFocus = "5G core service exposure inventory"
+	}
+
+	switch subdomain {
+	case "epdg.epc":
+		classification.ServiceClass = "VoWiFi ingress"
+		classification.Standards = "3GPP TS 23.003; GSMA IR.51; GSMA IR.61"
+		classification.SecurityFocus = "Wi-Fi calling edge and IPsec gateway exposure"
+	case "ims":
+		classification.ServiceClass = "IMS/VoLTE"
+		classification.Standards = "3GPP TS 23.003; GSMA IR.92"
+		classification.SecurityFocus = "Voice and messaging control-plane exposure"
+	case "bsf":
+		classification.ServiceClass = "Bootstrapping/authentication"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 33.220"
+		classification.SecurityFocus = "Authentication helper service exposure"
+	case "gan":
+		classification.ServiceClass = "Generic Access Network"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 43.318"
+		classification.SecurityFocus = "Legacy unlicensed mobile access exposure"
+	case "xcap.ims":
+		classification.ServiceClass = "IMS configuration"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 24.623"
+		classification.SecurityFocus = "Subscriber service configuration exposure"
+	case "sepp.5gc":
+		classification.ServiceClass = "5G roaming security edge"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 33.501; GSMA FS.34; GSMA IR.88"
+		classification.SecurityFocus = "N32 interconnect and roaming security boundary exposure"
+	case "nrf.5gc":
+		classification.ServiceClass = "5G service registry"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 29.510"
+		classification.SecurityFocus = "5G service discovery exposure"
+	case "nssf.5gc":
+		classification.ServiceClass = "5G slice selection"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 29.531"
+		classification.SecurityFocus = "Network slice selection exposure"
+	case "ausf.5gc", "udm.5gc":
+		classification.ServiceClass = "5G subscriber authentication/data"
+		classification.Standards = "3GPP TS 23.003; 3GPP TS 33.501"
+		classification.SecurityFocus = "Subscriber identity and authentication service exposure"
+	case "amf.5gc", "smf.5gc":
+		classification.ServiceClass = "5G mobility/session control"
+		classification.Standards = "3GPP TS 23.003"
+		classification.SecurityFocus = "5G control-plane function exposure"
+	}
+
+	return classification
 }
 
 // formatIPCount formats IP count for display
