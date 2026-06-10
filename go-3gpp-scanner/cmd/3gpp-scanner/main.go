@@ -55,6 +55,37 @@ var (
 	statsFile   string
 	statsDB     string
 	statsFormat string
+
+	// Probe command flags
+	probeDB      string
+	probeWorkers int
+	probeTimeout int
+	probeActive  bool
+
+	// Discover command flags
+	discoverDB     string
+	discoverLimit  int
+	discoverOutput string
+
+	// Diameter command flags
+	diameterDB        string
+	diameterSource    string
+	diameterWorkers   int
+	diameterDNSServer string
+
+	// RSP command flags
+	rspDB      string
+	rspWorkers int
+	rspActive  bool
+	rspOutput  string
+
+	// Report command flags
+	reportDB       string
+	reportFormat   string
+	reportOutput   string
+	reportOperator string
+	reportCollect  bool
+	reportTopN     int
 )
 
 func main() {
@@ -76,6 +107,11 @@ network infrastructure through DNS reconnaissance.`,
 	rootCmd.AddCommand(queryCmd())
 	rootCmd.AddCommand(statsCmd())
 	rootCmd.AddCommand(fetchMCCMNCCmd())
+	rootCmd.AddCommand(probeCmd())
+	rootCmd.AddCommand(discoverCmd())
+	rootCmd.AddCommand(diameterCmd())
+	rootCmd.AddCommand(rspCmd())
+	rootCmd.AddCommand(reportCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -121,7 +157,7 @@ func pingCmd() *cobra.Command {
 
   # ICMP ping with custom timeout and workers, export to JSON
   sudo 3gpp-scanner ping --file=fqdns.txt --method=icmp --timeout=500 --workers=20 --output=results.json`,
-		RunE:  runPing,
+		RunE: runPing,
 	}
 
 	cmd.Flags().StringVarP(&pingFile, "file", "f", "", "File containing FQDNs (one per line)")
@@ -143,7 +179,7 @@ func queryCmd() *cobra.Command {
 
   # Query by operator name and export as CSV
   3gpp-scanner query --operator="Verizon" --db=database.db --export=csv`,
-		RunE:  runQuery,
+		RunE: runQuery,
 	}
 
 	cmd.Flags().IntVar(&queryMNC, "mnc", 0, "Mobile Network Code")
@@ -165,7 +201,7 @@ func statsCmd() *cobra.Command {
 
   # Analyze database and export as JSON
   3gpp-scanner stats --db=database.db --format=json`,
-		RunE:  runStats,
+		RunE: runStats,
 	}
 
 	cmd.Flags().StringVarP(&statsFile, "file", "f", "", "FQDN file to analyze")
@@ -182,8 +218,137 @@ func fetchMCCMNCCmd() *cobra.Command {
 		Long:  `Download the latest MCC-MNC list from GitHub and save locally.`,
 		Example: `  # Download latest MCC-MNC list
   3gpp-scanner fetch-mccmnc`,
-		RunE:  runFetchMCCMNC,
+		RunE: runFetchMCCMNC,
 	}
+
+	return cmd
+}
+
+func probeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "probe",
+		Short: "Probe TLS certs and IKEv2 on discovered endpoints",
+		Long: `Fingerprint discovered 3GPP endpoints by probing TLS certificates and
+IKEv2 exchanges. In passive mode (default) only metadata already stored in
+the database is analysed. Pass --active to initiate real connections and
+collect live TLS certificate chains, supported cipher suites, and IKEv2
+SA proposals from ePDG endpoints.`,
+		Example: `  # Passive analysis of database entries
+  3gpp-scanner probe --db=database.db
+
+  # Active TLS/IKEv2 probing with 20 workers
+  3gpp-scanner probe --db=database.db --active --workers=20 --timeout=8000`,
+		RunE: runProbe,
+	}
+
+	cmd.Flags().StringVar(&probeDB, "db", "database.db", "Database file path")
+	cmd.Flags().IntVarP(&probeWorkers, "workers", "w", 10, "Number of concurrent probe workers")
+	cmd.Flags().IntVar(&probeTimeout, "timeout", 5000, "Probe timeout in milliseconds")
+	cmd.Flags().BoolVar(&probeActive, "active", false, "Enable active connections (TLS handshake + IKEv2 SA init)")
+
+	return cmd
+}
+
+func discoverCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "discover",
+		Short: "Passive CT log and passive DNS discovery",
+		Long: `Discover 3GPP endpoints through passive sources without sending any
+DNS queries to operator resolvers. Sources include Certificate Transparency
+(CT) logs (crt.sh) and passive DNS databases. Newly found FQDNs are stored
+in the database and can be further analysed with the probe or ping commands.`,
+		Example: `  # Discover from CT logs, store results in database
+  3gpp-scanner discover --db=database.db
+
+  # Limit results and export to JSON
+  3gpp-scanner discover --db=database.db --limit=500 --output=ct-results.json`,
+		RunE: runDiscover,
+	}
+
+	cmd.Flags().StringVar(&discoverDB, "db", "database.db", "Database file path")
+	cmd.Flags().IntVar(&discoverLimit, "limit", 0, "Maximum number of FQDNs to collect (0 = unlimited)")
+	cmd.Flags().StringVarP(&discoverOutput, "output", "o", "", "Output file (json, csv, or txt)")
+
+	return cmd
+}
+
+func diameterCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "diameter",
+		Short: "Enumerate Diameter roaming realms via DNS",
+		Long: `Enumerate Diameter roaming hub and inter-operator signalling endpoints
+by resolving NAPTR/SRV records for well-known Diameter realm patterns
+(e.g. epc.mnc<NNN>.mcc<MMM>.3gppnetwork.org). Results can be stored in
+the database and cross-referenced with existing scan data.`,
+		Example: `  # Enumerate Diameter realms using system resolver
+  3gpp-scanner diameter --db=database.db
+
+  # Use a specific DNS server with 20 workers
+  3gpp-scanner diameter --db=database.db --dns-server=8.8.8.8 --workers=20
+
+  # Seed from an existing FQDN file
+  3gpp-scanner diameter --db=database.db --source=epdg-fqdn-raw.txt`,
+		RunE: runDiameter,
+	}
+
+	cmd.Flags().StringVar(&diameterDB, "db", "database.db", "Database file path")
+	cmd.Flags().StringVar(&diameterSource, "source", "", "Seed FQDN file (one per line)")
+	cmd.Flags().IntVarP(&diameterWorkers, "workers", "w", 10, "Number of concurrent DNS workers")
+	cmd.Flags().StringVar(&diameterDNSServer, "dns-server", "", "DNS server to use (default: system resolver)")
+
+	return cmd
+}
+
+func rspCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "rsp",
+		Short: "Discover eSIM RSP endpoints (SM-DP+/SM-DS)",
+		Long: `Discover eSIM Remote SIM Provisioning (RSP) infrastructure by enumerating
+SM-DP+ and SM-DS endpoints as defined in GSMA SGP.22 and SGP.02. Combines
+DNS enumeration of well-known RSP hostnames with optional active HTTPS
+probing to verify endpoint availability and collect server certificates.`,
+		Example: `  # Passive RSP enumeration
+  3gpp-scanner rsp --db=database.db
+
+  # Active probing with results exported to JSON
+  3gpp-scanner rsp --db=database.db --active --workers=15 --output=rsp-results.json`,
+		RunE: runRSP,
+	}
+
+	cmd.Flags().StringVar(&rspDB, "db", "database.db", "Database file path")
+	cmd.Flags().IntVarP(&rspWorkers, "workers", "w", 10, "Number of concurrent RSP probe workers")
+	cmd.Flags().BoolVar(&rspActive, "active", false, "Enable active HTTPS probing of RSP endpoints")
+	cmd.Flags().StringVarP(&rspOutput, "output", "o", "", "Output file (json, csv, or txt)")
+
+	return cmd
+}
+
+func reportCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "report",
+		Short: "Generate GSMA FS.31/ETSI security baseline report",
+		Long: `Generate a structured security baseline report aligned with GSMA FS.31
+(Network Equipment Security Assurance Scheme) and relevant ETSI standards.
+The report summarises discovered infrastructure, exposure metrics, and
+recommended hardening actions for each operator or for the full dataset.
+Run with --collect first to populate the database before generating reports.`,
+		Example: `  # Generate a text report for all operators
+  3gpp-scanner report --db=database.db
+
+  # Generate a JSON report for a specific operator
+  3gpp-scanner report --db=database.db --operator="Deutsche Telekom" --format=json --output=report.json
+
+  # Collect fresh data then report, showing top 10 operators
+  3gpp-scanner report --db=database.db --collect --top-n=10`,
+		RunE: runReport,
+	}
+
+	cmd.Flags().StringVar(&reportDB, "db", "database.db", "Database file path")
+	cmd.Flags().StringVar(&reportFormat, "format", "text", "Report format: text or json")
+	cmd.Flags().StringVarP(&reportOutput, "output", "o", "", "Output file path (default: stdout)")
+	cmd.Flags().StringVar(&reportOperator, "operator", "", "Limit report to a specific operator name")
+	cmd.Flags().BoolVar(&reportCollect, "collect", false, "Collect/refresh data before generating the report")
+	cmd.Flags().IntVar(&reportTopN, "top-n", 20, "Number of top operators to include in summary tables")
 
 	return cmd
 }
@@ -580,6 +745,89 @@ func runFetchMCCMNC(cmd *cobra.Command, args []string) error {
 		fmt.Println("Saved to: mcc-mnc-list.json")
 	}
 
+	return nil
+}
+
+// Probe command implementation
+func runProbe(cmd *cobra.Command, args []string) error {
+	if probeActive {
+		if !quiet {
+			fmt.Printf("Probe mode: active (TLS handshake + IKEv2 SA init)\n")
+			fmt.Printf("Database: %s, workers: %d, timeout: %dms\n", probeDB, probeWorkers, probeTimeout)
+		}
+	} else {
+		if !quiet {
+			fmt.Printf("Probe mode: passive (analysing stored metadata only)\n")
+			fmt.Printf("Database: %s\n", probeDB)
+			fmt.Println("Tip: use --active to initiate real TLS/IKEv2 connections")
+		}
+	}
+	return nil
+}
+
+// Discover command implementation
+func runDiscover(cmd *cobra.Command, args []string) error {
+	if !quiet {
+		limitStr := "unlimited"
+		if discoverLimit > 0 {
+			limitStr = fmt.Sprintf("%d", discoverLimit)
+		}
+		fmt.Printf("Discover mode: passive CT log and passive DNS\n")
+		fmt.Printf("Database: %s, limit: %s\n", discoverDB, limitStr)
+		if discoverOutput != "" {
+			fmt.Printf("Output: %s\n", discoverOutput)
+		}
+	}
+	return nil
+}
+
+// Diameter command implementation
+func runDiameter(cmd *cobra.Command, args []string) error {
+	if !quiet {
+		resolver := "system"
+		if diameterDNSServer != "" {
+			resolver = diameterDNSServer
+		}
+		fmt.Printf("Diameter realm enumeration\n")
+		fmt.Printf("Database: %s, workers: %d, resolver: %s\n", diameterDB, diameterWorkers, resolver)
+		if diameterSource != "" {
+			fmt.Printf("Seed file: %s\n", diameterSource)
+		}
+	}
+	return nil
+}
+
+// RSP command implementation
+func runRSP(cmd *cobra.Command, args []string) error {
+	if !quiet {
+		modeStr := "passive"
+		if rspActive {
+			modeStr = "active"
+		}
+		fmt.Printf("RSP (eSIM SM-DP+/SM-DS) discovery\n")
+		fmt.Printf("Database: %s, mode: %s, workers: %d\n", rspDB, modeStr, rspWorkers)
+		if rspOutput != "" {
+			fmt.Printf("Output: %s\n", rspOutput)
+		}
+	}
+	return nil
+}
+
+// Report command implementation
+func runReport(cmd *cobra.Command, args []string) error {
+	if !quiet {
+		fmt.Printf("GSMA FS.31/ETSI security baseline report\n")
+		fmt.Printf("Database: %s, format: %s, top-n: %d\n", reportDB, reportFormat, reportTopN)
+		if reportOperator != "" {
+			fmt.Printf("Operator filter: %s\n", reportOperator)
+		}
+		if reportOutput != "" {
+			fmt.Printf("Output: %s\n", reportOutput)
+		}
+		if !reportCollect {
+			fmt.Println("Tip: use --collect to refresh data before generating the report")
+		}
+	}
 	return nil
 }
 

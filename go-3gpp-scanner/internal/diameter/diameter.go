@@ -102,11 +102,6 @@ var realmPrefixes = []string{"epc", "ims", "mnc"}
 // for the given MNC/MCC combination. It returns one DiameterRealm per realm
 // that has at least one NAPTR record. DNS errors are handled gracefully.
 func (s *Scanner) ProbeOperator(ctx context.Context, mnc, mcc int, operator, country string) []DiameterRealm {
-	type probeResult struct {
-		realm DiameterRealm
-		found bool
-	}
-
 	results := make([]DiameterRealm, 0, len(realmPrefixes))
 	resultsMu := &sync.Mutex{}
 

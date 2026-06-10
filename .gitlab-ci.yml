@@ -280,6 +280,11 @@ cli_help:
     - python3 $SCRIPTS_DIR/3gpppub-cli.py stats --help
     - python3 $SCRIPTS_DIR/3gpppub-cli.py score --help
     - python3 $SCRIPTS_DIR/3gpppub-cli.py export --help
+    - python3 $SCRIPTS_DIR/3gpppub-tls-ike-probe.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-passive-discovery.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-diameter-discovery.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-rsp-discovery.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-baseline-report.py --help
   rules:
     - changes:
         - epdg/*.py
@@ -300,6 +305,11 @@ schemas = {
     '5g':         ('epdg/3gpppub-5g-discovery.py',            'SCHEMA_5G'),
     'naptr':      ('epdg/3gpppub-naptr-discovery.py',         'SCHEMA_NAPTR'),
     'diff':       ('epdg/3gpppub-diff.py',                    'SCHEMA_DIFF'),
+    'tls_ike':  ("epdg/3gpppub-tls-ike-probe.py",       "SCHEMA_TLS_IKE"),
+    'passive':  ("epdg/3gpppub-passive-discovery.py",    "SCHEMA_PASSIVE"),
+    'diameter': ("epdg/3gpppub-diameter-discovery.py",   "SCHEMA_DIAMETER"),
+    'rsp':      ("epdg/3gpppub-rsp-discovery.py",        "SCHEMA_RSP"),
+    'baseline': ("epdg/3gpppub-baseline-report.py",      "SCHEMA_BASELINE"),
 }
 for name, (path, attr) in schemas.items():
     spec = spec_from_file_location(name, path)
@@ -422,3 +432,34 @@ EOF
     - changes:
         - epdg/*.py
         - epdg/requirements.txt
+
+go_test:
+  stage: test
+  before_script:
+    - apt-get update && apt-get install -y build-essential
+    - cd go-3gpp-scanner && go mod download
+  script:
+    - go test -v ./... -coverprofile=coverage.out
+    - go tool cover -func=coverage.out | tail -1
+  coverage: "/total:\\s+(\\d+\\.\\d+)%/"
+  artifacts:
+    paths:
+      - go-3gpp-scanner/coverage.out
+    expire_in: 7 days
+  rules:
+    - changes:
+        - go-3gpp-scanner/**/*.go
+
+python_pytest:
+  stage: test
+  image: $PYTHON_IMAGE
+  before_script:
+    - pip install --quiet uv
+    - uv sync --dev --no-install-project
+  script:
+    - uv run pytest epdg/tests/ -v --tb=short
+  rules:
+    - changes:
+        - epdg/*.py
+        - epdg/tests/*.py
+        - pyproject.toml
