@@ -70,6 +70,28 @@ This is a security research toolkit for discovering and analyzing ePDG (evolved 
   - Reads from `epdg-fqdn-raw.txt`
   - Generates bar chart of discovered FQDNs by country code
 
+### New Security Features (Features 1–5)
+
+- **3gpppub-tls-ike-probe.py** - TLS cert + IKEv2 fingerprinting (`--active` to connect)
+  - Probes TLS certs on xcap.ims / pcscf.ims / rcs / ims (port 443) and IKEv2 on epdg.epc (UDP 500/4500)
+  - Detects: expired/self-signed/weak-sig certs, vendor (Ericsson/Nokia/Huawei/Cisco/…), weak IKE crypto
+
+- **3gpppub-passive-discovery.py** - CT log + passive DNS discovery (no active probing)
+  - Queries crt.sh and HackerTarget for `*.3gppnetwork.org` hosts not in predefined subdomain list
+  - Flags new candidate service prefixes for `SUBDOMAIN_DEFS`
+
+- **3gpppub-diameter-discovery.py** - Diameter signalling realm enumeration (GSMA IR.88)
+  - Probes `epc.mnc<MNC>.mcc<MCC>.3gppnetwork.org` NAPTR/SRV for S6a/SWm/SWx/Cx interfaces
+  - Use `--dns-server <GRX_IP>` for full coverage on GRX/IPX networks
+
+- **3gpppub-rsp-discovery.py** - eSIM SM-DP+/SM-DS discovery (GSMA SGP.22)
+  - Resolves eSIM provisioning FQDNs per MCC-MNC; `--active` to probe ES9+ HTTPS endpoints
+  - Fingerprints vendor (Thales/IDEMIA/G+D/Valid) from TLS cert
+
+- **3gpppub-baseline-report.py** - GSMA FS.31 / ETSI security baseline report
+  - Aggregates all DB signals into per-operator risk findings with control references
+  - Use `--collect` to run analysis, then `--format markdown/json/html` to export
+
 ## Common Commands
 
 ### Running DNS Discovery
