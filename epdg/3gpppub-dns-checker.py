@@ -5,6 +5,7 @@ Prints discovered FQDNs to stdout and optionally to a file.
 """
 
 import argparse
+import ipaddress
 import sys
 import time
 
@@ -22,26 +23,55 @@ PARENT_DOMAIN = "pub.3gppnetwork.org"
 MCC_MNC_URL = "https://raw.githubusercontent.com/pbakondy/mcc-mnc-list/master/mcc-mnc-list.json"
 
 
-def resolve(fqdn: str, rtype: str) -> list[str]:
+def classify_ips(ips: list[str]) -> str:
+    has_public = False
+    has_loopback = False
+    for raw_ip in ips:
+        try:
+            ip = ipaddress.ip_address(raw_ip)
+        except ValueError:
+            continue
+        if ip.is_loopback:
+            has_loopback = True
+            continue
+        if ip.is_global:
+            has_public = True
+    if has_public:
+        return "PUBLIC_IP"
+    if has_loopback:
+        return "LOOPBACK_127"
+    return "NON_PUBLIC_IP"
+
+
+def resolve(fqdn: str, rtype: str) -> tuple[str, str, list[str]]:
     try:
         answers = dns.resolver.resolve(fqdn, rtype)
-        return [r.address for r in answers]
-    except (NXDOMAIN, NoAnswer, Timeout):
-        return []
+        ips = [r.address for r in answers.rrset] if answers.rrset else []
+        if ips:
+            return "ANSWERED", classify_ips(ips), ips
+        return "NODATA", "NONE", []
+    except NXDOMAIN:
+        return "NXDOMAIN", "NONE", []
+    except NoAnswer:
+        return "NODATA", "NONE", []
+    except Timeout:
+        return "TIMEOUT", "NONE", []
+    except dns.resolver.NoNameservers:
+        return "SERVFAIL", "NONE", []
     except Exception:
-        return []
+        return "ERROR", "NONE", []
 
 
 def check_operator(mnc: int, mcc: int, subdomains: list[str], ipv6: bool) -> list[tuple]:
-    """Return list of (fqdn, record_type, ips) for found records."""
+    """Return list of (fqdn, record_type, dns_status, ip_class, ips) for found records."""
     found = []
     rtypes = ["A", "AAAA"] if ipv6 else ["A"]
     for subdomain in subdomains:
         fqdn = f"{subdomain}.mnc{mnc:03d}.mcc{mcc:03d}.{PARENT_DOMAIN}"
         for rtype in rtypes:
-            ips = resolve(fqdn, rtype)
-            if ips:
-                found.append((fqdn, rtype, ips))
+            dns_status, ip_class, ips = resolve(fqdn, rtype)
+            if dns_status == "ANSWERED" and ips:
+                found.append((fqdn, rtype, dns_status, ip_class, ips))
     return found
 
 
@@ -100,8 +130,8 @@ def main():
             print(f"[{i}/{total}] {country} — {operator}", file=sys.stderr)
 
         results = check_operator(mnc, mcc, args.subdomains, args.ipv6)
-        for fqdn, rtype, ips in results:
-            line = f"{rtype}\t{fqdn}\t{','.join(ips)}\t{country}\t{operator}"
+        for fqdn, rtype, dns_status, ip_class, ips in results:
+            line = f"{rtype}\t{fqdn}\t{dns_status}\t{ip_class}\t{','.join(ips)}\t{country}\t{operator}"
             emit(line)
             found_total += 1
 

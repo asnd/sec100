@@ -3,9 +3,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -36,6 +39,7 @@ var (
 	scanConcurrency int
 	scanDelay       int
 	scanMCCMNCFile  string
+	scanDNSServers  string
 
 	// Ping command flags
 	pingFile    string
@@ -143,6 +147,7 @@ global MCC-MNC combinations to identify exposed telecom infrastructure.`,
 	cmd.Flags().IntVarP(&scanConcurrency, "concurrency", "c", 10, "Number of concurrent DNS queries")
 	cmd.Flags().IntVar(&scanDelay, "delay", 500, "Delay between queries in milliseconds")
 	cmd.Flags().StringVar(&scanMCCMNCFile, "mccmnc-file", "", "Use local MCC-MNC JSON file instead of fetching")
+	cmd.Flags().StringVar(&scanDNSServers, "dns-servers", "", "Comma-separated list of DNS servers (e.g., 8.8.8.8:53,1.1.1.1:53)")
 
 	return cmd
 }
@@ -470,11 +475,25 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	// Configure scanner
+	var dnsServers []string
+	if scanDNSServers != "" {
+		for _, s := range strings.Split(scanDNSServers, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				if !strings.Contains(s, ":") {
+					s += ":53"
+				}
+				dnsServers = append(dnsServers, s)
+			}
+		}
+	}
+
 	config := &models.ScanConfig{
 		ParentDomain: "pub.3gppnetwork.org",
 		Subdomains:   subdomains,
 		QueryDelay:   time.Duration(scanDelay) * time.Millisecond,
 		Concurrency:  scanConcurrency,
+		DNSServers:   dnsServers,
 		Verbose:      verbose,
 	}
 
@@ -717,15 +736,78 @@ func runStats(cmd *cobra.Command, args []string) error {
 	}
 
 	// Output stats
-	if statsFormat == "json" {
-		if err := output.ExportJSON(st, "/dev/stdout"); err != nil {
+	switch statsFormat {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(st); err != nil {
 			return fmt.Errorf("JSON export failed: %w", err)
 		}
-	} else {
+	case "csv":
+		if err := outputStatsCSV(st); err != nil {
+			return fmt.Errorf("CSV export failed: %w", err)
+		}
+	default:
 		fmt.Print(stats.FormatStats(st))
 	}
 
 	return nil
+}
+
+func outputStatsCSV(st *models.Stats) error {
+	w := csv.NewWriter(os.Stdout)
+	if err := w.Write([]string{"type", "key", "value"}); err != nil {
+		return err
+	}
+
+	metricRows := [][2]string{
+		{"total_fqdns", fmt.Sprintf("%d", st.TotalFQDNs)},
+		{"total_ips", fmt.Sprintf("%d", st.TotalIPs)},
+		{"unique_operators", fmt.Sprintf("%d", st.UniqueOperators)},
+	}
+	for _, row := range metricRows {
+		if err := w.Write([]string{"metric", row[0], row[1]}); err != nil {
+			return err
+		}
+	}
+
+	for _, kv := range sortedMapEntries(st.MCCDistribution) {
+		if err := w.Write([]string{"mcc", kv.Key, fmt.Sprintf("%d", kv.Value)}); err != nil {
+			return err
+		}
+	}
+	for _, kv := range sortedMapEntries(st.SubdomainCounts) {
+		if err := w.Write([]string{"subdomain", kv.Key, fmt.Sprintf("%d", kv.Value)}); err != nil {
+			return err
+		}
+	}
+	for _, kv := range sortedMapEntries(st.CountryCounts) {
+		if err := w.Write([]string{"country", kv.Key, fmt.Sprintf("%d", kv.Value)}); err != nil {
+			return err
+		}
+	}
+
+	w.Flush()
+	return w.Error()
+}
+
+type statsMapEntry struct {
+	Key   string
+	Value int
+}
+
+func sortedMapEntries(m map[string]int) []statsMapEntry {
+	entries := make([]statsMapEntry, 0, len(m))
+	for k, v := range m {
+		entries = append(entries, statsMapEntry{Key: k, Value: v})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Value == entries[j].Value {
+			return entries[i].Key < entries[j].Key
+		}
+		return entries[i].Value > entries[j].Value
+	})
+	return entries
 }
 
 // Fetch MCC-MNC command implementation

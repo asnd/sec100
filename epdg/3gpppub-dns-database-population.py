@@ -36,6 +36,7 @@ Services checked (pub.3gppnetwork.org zone):
 """
 
 import argparse
+import ipaddress
 import json
 import logging
 import sqlite3
@@ -85,6 +86,8 @@ CREATE TABLE IF NOT EXISTS available_fqdns (
     fqdn         TEXT    NOT NULL,
     record_type  TEXT    NOT NULL DEFAULT 'A',
     service      TEXT,
+    dns_status   TEXT,
+    ip_class     TEXT,
     resolved_ips TEXT,
     first_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -108,24 +111,64 @@ def init_db(db_path: str) -> sqlite3.Connection:
         log.info("Migrated available_fqdns: added service column")
     except sqlite3.OperationalError:
         pass  # Column already present
+    try:
+        conn.execute("ALTER TABLE available_fqdns ADD COLUMN dns_status TEXT")
+        conn.commit()
+        log.info("Migrated available_fqdns: added dns_status column")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE available_fqdns ADD COLUMN ip_class TEXT")
+        conn.commit()
+        log.info("Migrated available_fqdns: added ip_class column")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     return conn
 
 
-def resolve_fqdn(fqdn: str, record_type: str, retries: int = 2) -> list[str]:
+def classify_ips(ips: list[str]) -> str:
+    has_public = False
+    has_loopback = False
+    for raw_ip in ips:
+        try:
+            ip = ipaddress.ip_address(raw_ip)
+        except ValueError:
+            continue
+        if ip.is_loopback:
+            has_loopback = True
+            continue
+        if ip.is_global:
+            has_public = True
+    if has_public:
+        return "PUBLIC_IP"
+    if has_loopback:
+        return "LOOPBACK_127"
+    return "NON_PUBLIC_IP"
+
+
+def resolve_fqdn(fqdn: str, record_type: str, retries: int = 2) -> tuple[str, str, list[str]]:
     for attempt in range(retries + 1):
         try:
             answers = dns.resolver.resolve(fqdn, record_type)
-            return [rdata.address for rdata in answers]
-        except (NXDOMAIN, NoAnswer):
-            return []
+            ips = [rdata.address for rdata in answers.rrset] if answers.rrset else []
+            if ips:
+                return "ANSWERED", classify_ips(ips), ips
+            return "NODATA", "NONE", []
+        except NXDOMAIN:
+            return "NXDOMAIN", "NONE", []
+        except NoAnswer:
+            return "NODATA", "NONE", []
         except Timeout:
             if attempt < retries:
                 time.sleep(0.3 * (attempt + 1))
-            return []
+                continue
+            return "TIMEOUT", "NONE", []
+        except dns.resolver.NoNameservers:
+            return "SERVFAIL", "NONE", []
         except Exception:
-            return []
-    return []
+            return "ERROR", "NONE", []
+    return "TIMEOUT", "NONE", []
 
 
 def check_operator(item: dict, subdomains: list[str], record_types: list[str]) -> dict:
@@ -135,22 +178,24 @@ def check_operator(item: dict, subdomains: list[str], record_types: list[str]) -
     except (KeyError, ValueError):
         return {}
 
-    operator     = item.get("operator", "Unknown")
-    country_name = item.get("countryName", "Unknown")
-    country_code = item.get("countryCode", "")
+    operator     = item.get("operator") or "Unknown"
+    country_name = item.get("countryName") or "Unknown"
+    country_code = item.get("countryCode") or ""
 
     found = []
     for subdomain in subdomains:
         fqdn = f"{subdomain}.mnc{mnc:03d}.mcc{mcc:03d}.{PARENT_DOMAIN}"
         for rtype in record_types:
-            ips = resolve_fqdn(fqdn, rtype)
-            if ips:
+            dns_status, ip_class, ips = resolve_fqdn(fqdn, rtype)
+            if dns_status == "ANSWERED" and ips:
                 found.append({
                     "fqdn":         fqdn,
                     "record_type":  rtype,
+                    "dns_status":   dns_status,
+                    "ip_class":     ip_class,
                     "resolved_ips": ",".join(ips),
                 })
-                log.info("  [+] %s %s -> %s", rtype, fqdn, ", ".join(ips))
+                log.info("  [+] %s %s [%s] -> %s", rtype, fqdn, ip_class, ", ".join(ips))
 
     return {
         "mnc": mnc, "mcc": mcc,
@@ -181,11 +226,13 @@ def save_result(conn: sqlite3.Connection, result: dict) -> None:
             conn.execute(
                 """
                 INSERT INTO available_fqdns
-                    (mnc, mcc, operator, country_name, fqdn, record_type, service, resolved_ips, first_seen, last_seen)
+                    (mnc, mcc, operator, country_name, fqdn, record_type, service, dns_status, ip_class, resolved_ips, first_seen, last_seen)
                 VALUES
-                    (:mnc, :mcc, :operator, :country_name, :fqdn, :record_type, :service, :resolved_ips, :now, :now)
+                    (:mnc, :mcc, :operator, :country_name, :fqdn, :record_type, :service, :dns_status, :ip_class, :resolved_ips, :now, :now)
                 ON CONFLICT(fqdn, record_type) DO UPDATE SET
                     service      = excluded.service,
+                    dns_status   = excluded.dns_status,
+                    ip_class     = excluded.ip_class,
                     resolved_ips = excluded.resolved_ips,
                     last_seen    = excluded.last_seen
                 """,
@@ -197,6 +244,8 @@ def save_result(conn: sqlite3.Connection, result: dict) -> None:
                     "fqdn":         fqdn_entry["fqdn"],
                     "record_type":  fqdn_entry["record_type"],
                     "service":      fqdn_to_service(fqdn_entry["fqdn"]),
+                    "dns_status":   fqdn_entry["dns_status"],
+                    "ip_class":     fqdn_entry["ip_class"],
                     "resolved_ips": fqdn_entry["resolved_ips"],
                     "now":          now,
                 },

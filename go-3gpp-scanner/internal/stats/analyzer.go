@@ -23,7 +23,7 @@ func NewAnalyzer() *Analyzer {
 	return &Analyzer{
 		mccPattern:       regexp.MustCompile(`mcc(\d+)\.`),
 		mncPattern:       regexp.MustCompile(`mnc(\d+)\.`),
-		subdomainPattern: regexp.MustCompile(`^([^.]+)\.`),
+		subdomainPattern: regexp.MustCompile(`^(.+)\.mnc\d+\.mcc\d+\.`),
 	}
 }
 
@@ -144,6 +144,19 @@ func FormatStats(stats *models.Stats) string {
 		sb.WriteString("Subdomain Distribution:\n")
 		subPairs := sortMapByValue(stats.SubdomainCounts)
 		for _, pair := range subPairs {
+			sb.WriteString(fmt.Sprintf("  %s: %d\n", pair.Key, pair.Value))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Country Distribution
+	if len(stats.CountryCounts) > 0 {
+		sb.WriteString("Country Distribution (Top 10):\n")
+		countryPairs := sortMapByValue(stats.CountryCounts)
+		for i, pair := range countryPairs {
+			if i >= 10 {
+				break
+			}
 			sb.WriteString(fmt.Sprintf("  %s: %d\n", pair.Key, pair.Value))
 		}
 		sb.WriteString("\n")

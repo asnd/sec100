@@ -269,10 +269,12 @@ with tab_raw:
 with tab_map:
     st.subheader("Geographic distribution of discovered services")
 
+    df_map = df.assign(operator_key=df["mcc"].astype(str) + "-" + df["mnc"].astype(str))
+
     # Build country-level aggregate with ISO alpha-3 from operators table
     map_df = (
-        df.groupby(["country_name"])
-        .agg(total_fqdns=("fqdn", "count"), operators=("mcc", "nunique"))
+        df_map.groupby(["country_name"])
+        .agg(total_fqdns=("fqdn", "count"), operators=("operator_key", "nunique"))
         .reset_index()
     )
     # Attach country_code from operators table for choropleth

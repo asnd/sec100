@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -28,14 +29,32 @@ type job struct {
 	subdomain string
 }
 
+type dnsResolution struct {
+	ips       []string
+	dnsStatus string
+	ipClass   string
+}
+
 // NewScanner creates a new DNS scanner
 func NewScanner(config *models.ScanConfig) *Scanner {
 	// Calculate rate limit: delay between queries
-	qps := 1.0 / config.QueryDelay.Seconds()
-	limiter := rate.NewLimiter(rate.Limit(qps), 1)
+	qps := rate.Inf
+	if config.QueryDelay > 0 {
+		qps = rate.Limit(1.0 / config.QueryDelay.Seconds())
+	}
+	limiter := rate.NewLimiter(qps, 1)
 
 	client := &dns.Client{
 		Timeout: 5 * time.Second,
+	}
+
+	// Set default DNS servers if none provided
+	if len(config.DNSServers) == 0 {
+		config.DNSServers = []string{
+			"8.8.8.8:53",        // Google DNS
+			"1.1.1.1:53",        // Cloudflare DNS
+			"208.67.222.222:53", // OpenDNS
+		}
 	}
 
 	return &Scanner{
@@ -103,10 +122,12 @@ func (s *Scanner) worker(ctx context.Context, jobs <-chan job, results *[]models
 				*results = append(*results, *result)
 				mux.Unlock()
 
-				found.Add(1)
+				if result.IPClass == "PUBLIC_IP" {
+					found.Add(1)
+				}
 
 				if s.config.Verbose {
-					fmt.Printf("Found A record for %s (%s IPs)\n", result.FQDN, formatIPCount(len(result.IPs)))
+					fmt.Printf("Resolved %s status=%s ip_class=%s (%s)\n", result.FQDN, result.DNSStatus, result.IPClass, formatIPCount(len(result.IPs)))
 				}
 			}
 
@@ -121,47 +142,70 @@ func (s *Scanner) worker(ctx context.Context, jobs <-chan job, results *[]models
 
 // resolveFQDN resolves a single FQDN
 func (s *Scanner) resolveFQDN(entry models.MCCMNCEntry, subdomain string) *models.DNSResult {
-	mcc, _ := strconv.Atoi(entry.MCC)
-	mnc, _ := strconv.Atoi(entry.MNC)
+	mcc, err := strconv.Atoi(entry.MCC)
+	if err != nil {
+		return nil
+	}
+	mnc, err := strconv.Atoi(entry.MNC)
+	if err != nil {
+		return nil
+	}
+	country := entry.CountryName
+	if country == "" {
+		country = "Unknown"
+	}
 
 	fqdn := fmt.Sprintf("%s.mnc%03d.mcc%03d.%s", subdomain, mnc, mcc, s.config.ParentDomain)
 
-	ips, err := s.resolveA(fqdn)
-	if err != nil || len(ips) == 0 {
+	resolution := s.resolveA(fqdn)
+	if resolution == nil {
+		return nil
+	}
+	if resolution.dnsStatus != "ANSWERED" {
 		return nil
 	}
 
 	return &models.DNSResult{
 		FQDN:      fqdn,
-		IPs:       ips,
+		IPs:       resolution.ips,
 		Subdomain: subdomain,
 		MNC:       mnc,
 		MCC:       mcc,
 		Operator:  entry.Operator,
+		Country:   country,
+		DNSStatus: resolution.dnsStatus,
+		IPClass:   resolution.ipClass,
 		Timestamp: time.Now(),
 	}
 }
 
 // resolveA performs an A record DNS query
-func (s *Scanner) resolveA(fqdn string) ([]string, error) {
+func (s *Scanner) resolveA(fqdn string) *dnsResolution {
 	msg := new(dns.Msg)
 	msg.SetQuestion(dns.Fqdn(fqdn), dns.TypeA)
 	msg.RecursionDesired = true
 
-	// Try multiple DNS servers
-	servers := []string{
-		"8.8.8.8:53",        // Google DNS
-		"1.1.1.1:53",        // Cloudflare DNS
-		"208.67.222.222:53", // OpenDNS
-	}
+	status := "TIMEOUT"
 
-	for _, server := range servers {
+	for _, server := range s.config.DNSServers {
 		resp, _, err := s.dnsClient.Exchange(msg, server)
 		if err != nil {
 			continue
 		}
 
-		if resp.Rcode != dns.RcodeSuccess {
+		switch resp.Rcode {
+		case dns.RcodeNameError:
+			return &dnsResolution{dnsStatus: "NXDOMAIN", ipClass: "NONE"}
+		case dns.RcodeServerFailure:
+			status = "SERVFAIL"
+			continue
+		case dns.RcodeRefused:
+			status = "REFUSED"
+			continue
+		case dns.RcodeSuccess:
+			// Continue below.
+		default:
+			status = dns.RcodeToString[resp.Rcode]
 			continue
 		}
 
@@ -173,11 +217,40 @@ func (s *Scanner) resolveA(fqdn string) ([]string, error) {
 		}
 
 		if len(ips) > 0 {
-			return ips, nil
+			return &dnsResolution{ips: ips, dnsStatus: "ANSWERED", ipClass: classifyIPs(ips)}
+		}
+
+		return &dnsResolution{dnsStatus: "NODATA", ipClass: "NONE"}
+	}
+
+	return &dnsResolution{dnsStatus: status, ipClass: "NONE"}
+}
+
+func classifyIPs(ips []string) string {
+	hasPublic := false
+	hasLoopback := false
+
+	for _, raw := range ips {
+		addr, err := netip.ParseAddr(raw)
+		if err != nil {
+			continue
+		}
+		if addr.IsLoopback() {
+			hasLoopback = true
+			continue
+		}
+		if addr.IsGlobalUnicast() && !addr.IsPrivate() {
+			hasPublic = true
 		}
 	}
 
-	return nil, fmt.Errorf("no A records found")
+	if hasPublic {
+		return "PUBLIC_IP"
+	}
+	if hasLoopback {
+		return "LOOPBACK_127"
+	}
+	return "NON_PUBLIC_IP"
 }
 
 // BuildFQDN constructs a 3GPP FQDN from components

@@ -6,12 +6,17 @@ const (
 CREATE TABLE IF NOT EXISTS operators (
     mnc INTEGER,
     mcc INTEGER,
-    operator TEXT
+    operator TEXT,
+    country_name TEXT,
+    UNIQUE(mnc, mcc, operator)
 );
 
 CREATE TABLE IF NOT EXISTS available_fqdns (
+    mnc INTEGER,
+    mcc INTEGER,
     operator TEXT,
-    fqdn TEXT
+    fqdn TEXT,
+    UNIQUE(mnc, mcc, operator, fqdn)
 );
 
 CREATE INDEX IF NOT EXISTS idx_operators_mnc_mcc ON operators(mnc, mcc);

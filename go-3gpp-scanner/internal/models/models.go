@@ -24,6 +24,9 @@ type DNSResult struct {
 	MNC       int       `json:"mnc"`
 	MCC       int       `json:"mcc"`
 	Operator  string    `json:"operator"`
+	Country   string    `json:"country,omitempty"`
+	DNSStatus string    `json:"dns_status,omitempty"`
+	IPClass   string    `json:"ip_class,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
@@ -35,6 +38,7 @@ type ScanConfig struct {
 	Concurrency  int
 	DatabasePath string
 	MCCMNCSource string
+	DNSServers   []string
 	Verbose      bool
 }
 

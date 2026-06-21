@@ -147,6 +147,10 @@ func TestFormatStats(t *testing.T) {
 			"gan":      5,
 			"xcap.ims": 5,
 		},
+		CountryCounts: map[string]int{
+			"United States": 14,
+			"Germany":       7,
+		},
 		UniqueOperators: 25,
 		TotalIPs:        150,
 	}
@@ -171,6 +175,34 @@ func TestFormatStats(t *testing.T) {
 
 	if !contains(formatted, "Subdomain Distribution") {
 		t.Errorf("Formatted stats does not contain 'Subdomain Distribution'")
+	}
+
+	if !contains(formatted, "Country Distribution") {
+		t.Errorf("Formatted stats does not contain 'Country Distribution'")
+	}
+}
+
+func TestAnalyzeFileCapturesMultiLabelSubdomain(t *testing.T) {
+	tmpFile := t.TempDir() + "/test_multilabel_subdomain.txt"
+	testData := "epdg.epc.mnc001.mcc310.pub.3gppnetwork.org\n"
+
+	err := os.WriteFile(tmpFile, []byte(testData), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	analyzer := NewAnalyzer()
+	stats, err := analyzer.AnalyzeFile(tmpFile)
+	if err != nil {
+		t.Fatalf("AnalyzeFile failed: %v", err)
+	}
+
+	if stats.SubdomainCounts["epdg.epc"] != 1 {
+		t.Errorf("Expected 'epdg.epc' subdomain count 1, got %d", stats.SubdomainCounts["epdg.epc"])
+	}
+
+	if stats.SubdomainCounts["epdg"] != 0 {
+		t.Errorf("Expected 'epdg' subdomain count 0, got %d", stats.SubdomainCounts["epdg"])
 	}
 }
 

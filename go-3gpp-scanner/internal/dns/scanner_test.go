@@ -153,3 +153,25 @@ func TestFormatIPCount(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyIPs(t *testing.T) {
+	tests := []struct {
+		name     string
+		ips      []string
+		expected string
+	}{
+		{name: "public", ips: []string{"8.8.8.8"}, expected: "PUBLIC_IP"},
+		{name: "loopback", ips: []string{"127.0.0.1"}, expected: "LOOPBACK_127"},
+		{name: "private", ips: []string{"10.0.0.1"}, expected: "NON_PUBLIC_IP"},
+		{name: "mixed prefers public", ips: []string{"127.0.0.1", "1.1.1.1"}, expected: "PUBLIC_IP"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyIPs(tt.ips)
+			if got != tt.expected {
+				t.Fatalf("classifyIPs(%v)=%s, expected %s", tt.ips, got, tt.expected)
+			}
+		})
+	}
+}

@@ -16,43 +16,59 @@ mcp = FastMCP("3gpp-scanner")
 DB_PATH = os.environ.get("DB_PATH")
 
 def find_database():
+    """Find the database file in priority order."""
+    # 1. Environment variable
     if DB_PATH and os.path.exists(DB_PATH):
-        return DB_PATH
+        return os.path.abspath(DB_PATH)
+    
+    # 2. Well-known locations relative to workspace root
+    # We assume the MCP server is in /mcp-server/ relative to root
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     candidates = [
-        "go-3gpp-scanner/bin/database.db",
-        "database.db",
-        "../database.db",
-        "epdg/database.db",
-        "../epdg/database.db",
-        "../go-3gpp-scanner/bin/database.db"
+        os.path.join(root_dir, "database.db"),
+        os.path.join(root_dir, "go-3gpp-scanner", "bin", "database.db"),
+        os.path.join(root_dir, "epdg", "database.db"),
     ]
     
     for path in candidates:
-        abs_path = os.path.abspath(os.path.join(os.getcwd(), path))
-        if os.path.exists(abs_path):
-            return abs_path
+        if os.path.exists(path):
+            return path
     
-    return "database.db"
+    # 3. Fallback to current working directory
+    fallback = os.path.abspath("database.db")
+    return fallback
 
 DB_FILE = find_database()
 logger.info(f"Using database: {DB_FILE}")
 
 def get_db_connection():
+    if not os.path.exists(DB_FILE):
+        raise FileNotFoundError(f"Database file not found: {DB_FILE}")
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     return conn
 
 def resolve_fqdn(fqdn: str) -> list[str]:
-    """Resolve an FQDN to a list of IP addresses."""
+    """Resolve an FQDN to a list of IP addresses (IPv4 and IPv6)."""
+    ips = set()
     try:
-        # Get all info (IPv4 and IPv6)
-        # AF_UNSPEC allows both, SOCK_STREAM is arbitrary here as we just want IPs
-        addr_info = socket.getaddrinfo(fqdn, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
-        ips = sorted(list(set(info[4][0] for info in addr_info)))
-        return ips
+        # Try IPv4
+        addr_info = socket.getaddrinfo(fqdn, None, family=socket.AF_INET)
+        for info in addr_info:
+            ips.add(info[4][0])
     except Exception:
-        return []
+        pass
+        
+    try:
+        # Try IPv6
+        addr_info = socket.getaddrinfo(fqdn, None, family=socket.AF_INET6)
+        for info in addr_info:
+            ips.add(info[4][0])
+    except Exception:
+        pass
+        
+    return sorted(list(ips))
 
 def get_operator_active_infrastructure(cursor, operator_name: str) -> str:
     """Helper to get active infrastructure details for an operator."""

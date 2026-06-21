@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"3gpp-scanner/internal/models"
 
@@ -47,6 +48,27 @@ func (db *DB) InitSchema() error {
 	if err != nil {
 		return fmt.Errorf("failed to execute schema: %w", err)
 	}
+
+	// Best-effort migrations for databases created with older schema versions.
+	migrations := []string{
+		"ALTER TABLE operators ADD COLUMN country_name TEXT",
+		"ALTER TABLE available_fqdns ADD COLUMN mnc INTEGER",
+		"ALTER TABLE available_fqdns ADD COLUMN mcc INTEGER",
+		"CREATE INDEX IF NOT EXISTS idx_fqdns_mnc_mcc ON available_fqdns(mnc, mcc)",
+	}
+
+	for _, stmt := range migrations {
+		if _, err := db.conn.Exec(stmt); err != nil {
+			msg := err.Error()
+			if strings.Contains(msg, "duplicate column name") {
+				continue
+			}
+			if strings.Contains(msg, "already exists") {
+				continue
+			}
+			return fmt.Errorf("failed to run migration %q: %w", stmt, err)
+		}
+	}
 	return nil
 }
 
@@ -58,36 +80,28 @@ func (db *DB) InsertResults(results []models.DNSResult) error {
 	}
 	defer tx.Rollback()
 
-	// Prepare statements
-	operatorStmt, err := tx.Prepare("INSERT INTO operators (mnc, mcc, operator) VALUES (?, ?, ?)")
+	// Prepare statements with INSERT OR IGNORE to avoid unique constraint violations
+	operatorStmt, err := tx.Prepare("INSERT OR IGNORE INTO operators (mnc, mcc, operator, country_name) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare operator statement: %w", err)
 	}
 	defer operatorStmt.Close()
 
-	fqdnStmt, err := tx.Prepare("INSERT INTO available_fqdns (operator, fqdn) VALUES (?, ?)")
+	fqdnStmt, err := tx.Prepare("INSERT OR IGNORE INTO available_fqdns (mnc, mcc, operator, fqdn) VALUES (?, ?, ?, ?)")
 	if err != nil {
 		return fmt.Errorf("failed to prepare fqdn statement: %w", err)
 	}
 	defer fqdnStmt.Close()
 
-	// Track inserted operators to avoid duplicates
-	operatorSeen := make(map[string]bool)
-
 	for _, result := range results {
-		operatorKey := fmt.Sprintf("%d:%d:%s", result.MNC, result.MCC, result.Operator)
-
-		// Insert operator if not seen before
-		if !operatorSeen[operatorKey] {
-			_, err = operatorStmt.Exec(result.MNC, result.MCC, result.Operator)
-			if err != nil {
-				return fmt.Errorf("failed to insert operator: %w", err)
-			}
-			operatorSeen[operatorKey] = true
+		// Insert operator
+		_, err = operatorStmt.Exec(result.MNC, result.MCC, result.Operator, result.Country)
+		if err != nil {
+			return fmt.Errorf("failed to insert operator: %w", err)
 		}
 
 		// Insert FQDN
-		_, err = fqdnStmt.Exec(result.Operator, result.FQDN)
+		_, err = fqdnStmt.Exec(result.MNC, result.MCC, result.Operator, result.FQDN)
 		if err != nil {
 			return fmt.Errorf("failed to insert fqdn: %w", err)
 		}
@@ -105,11 +119,7 @@ func (db *DB) QueryByMNCMCC(mnc, mcc int) ([]string, error) {
 	query := `
 		SELECT fqdn
 		FROM available_fqdns
-		WHERE operator IN (
-			SELECT operator
-			FROM operators
-			WHERE mnc = ? AND mcc = ?
-		)
+		WHERE mnc = ? AND mcc = ?
 	`
 
 	rows, err := db.conn.Query(query, mnc, mcc)
@@ -136,9 +146,9 @@ func (db *DB) QueryByMNCMCC(mnc, mcc int) ([]string, error) {
 
 // QueryByOperator queries FQDNs for a specific operator name
 func (db *DB) QueryByOperator(operator string) ([]string, error) {
-	query := "SELECT fqdn FROM available_fqdns WHERE operator = ?"
+	query := "SELECT fqdn FROM available_fqdns WHERE operator LIKE ?"
 
-	rows, err := db.conn.Query(query, operator)
+	rows, err := db.conn.Query(query, "%"+operator+"%")
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -178,8 +188,8 @@ func (db *DB) GetAllOperators() ([]models.MCCMNCEntry, error) {
 			return nil, fmt.Errorf("scan failed: %w", err)
 		}
 		operators = append(operators, models.MCCMNCEntry{
-			MNC:      fmt.Sprintf("%d", mnc),
-			MCC:      fmt.Sprintf("%d", mcc),
+			MNC:      fmt.Sprintf("%03d", mnc),
+			MCC:      fmt.Sprintf("%03d", mcc),
 			Operator: operator,
 		})
 	}
@@ -230,5 +240,51 @@ func (db *DB) GetStats() (*models.Stats, error) {
 		stats.MCCDistribution[fmt.Sprintf("%d", mcc)] = count
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration failed: %w", err)
+	}
+
+	// Get country domain distribution
+	countryDist, err := db.GetCountryDomainDistribution()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get country domain distribution: %w", err)
+	}
+	for country, count := range countryDist {
+		stats.CountryCounts[country] = count
+	}
+
 	return stats, nil
+}
+
+// GetCountryDomainDistribution returns domain counts per country.
+func (db *DB) GetCountryDomainDistribution() (map[string]int, error) {
+	query := `
+		SELECT COALESCE(o.country_name, 'Unknown') AS country, COUNT(*) AS domains
+		FROM available_fqdns f
+		JOIN operators o ON o.mnc = f.mnc AND o.mcc = f.mcc AND o.operator = f.operator
+		GROUP BY country
+		ORDER BY domains DESC, country ASC
+	`
+
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	distribution := make(map[string]int)
+	for rows.Next() {
+		var country string
+		var domains int
+		if err := rows.Scan(&country, &domains); err != nil {
+			return nil, fmt.Errorf("scan failed: %w", err)
+		}
+		distribution[country] = domains
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration failed: %w", err)
+	}
+
+	return distribution, nil
 }

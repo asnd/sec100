@@ -136,10 +136,12 @@ def cmd_countries(args) -> int:
         print("No data found.")
         return 0
 
+    df = df.assign(operator_key=df["mcc"].astype(str) + "-" + df["mnc"].astype(str))
+
     ct = (
         df.groupby("country_name")
         .agg(
-            operators=("mcc", lambda x: df.loc[x.index, ["mnc", "mcc"]].drop_duplicates().shape[0]),
+            operators=("operator_key", "nunique"),
             fqdns=("fqdn", "count"),
             services=("service", lambda x: ", ".join(sorted(x.unique()))),
         )
@@ -169,6 +171,8 @@ def cmd_country(args) -> int:
         print(f"No records found for country matching '{args.name}'.")
         return 1
 
+    df = df.assign(operator_key=df["mcc"].astype(str) + "-" + df["mnc"].astype(str))
+
     matched = sorted(df["country_name"].unique())
     for country in matched:
         cdf = df[df["country_name"] == country]
@@ -176,7 +180,10 @@ def cmd_country(args) -> int:
         # Per-service counts
         svc_counts = (
             cdf.groupby("service")
-            .agg(operators=("mcc", "nunique"), fqdns=("fqdn", "count"))
+            .agg(
+                operators=("operator_key", "nunique"),
+                fqdns=("fqdn", "count"),
+            )
             .reset_index()
             .sort_values("fqdns", ascending=False)
         )
@@ -226,9 +233,14 @@ def cmd_services(args) -> int:
         print("No data found.")
         return 0
 
+    df = df.assign(operator_key=df["mcc"].astype(str) + "-" + df["mnc"].astype(str))
+
     svc = (
         df.groupby("service")
-        .agg(operators=("mcc", "nunique"), fqdns=("fqdn", "count"))
+        .agg(
+            operators=("operator_key", "nunique"),
+            fqdns=("fqdn", "count"),
+        )
         .reset_index()
         .sort_values("fqdns", ascending=False)
     )
