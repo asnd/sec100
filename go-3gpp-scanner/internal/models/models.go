@@ -18,24 +18,30 @@ type MCCMNCEntry struct {
 
 // DNSResult represents the result of a DNS query
 type DNSResult struct {
-	FQDN      string    `json:"fqdn"`
-	IPs       []string  `json:"ips"`
-	Subdomain string    `json:"subdomain"`
-	MNC       int       `json:"mnc"`
-	MCC       int       `json:"mcc"`
-	Operator  string    `json:"operator"`
-	Timestamp time.Time `json:"timestamp"`
+	FQDN          string    `json:"fqdn"`
+	IPs           []string  `json:"ips"`
+	Subdomain     string    `json:"subdomain"`
+	ParentDomain  string    `json:"parent_domain,omitempty"`
+	DomainProfile string    `json:"domain_profile,omitempty"`
+	ServiceClass  string    `json:"service_class,omitempty"`
+	Standards     string    `json:"standards,omitempty"`
+	SecurityFocus string    `json:"security_focus,omitempty"`
+	MNC           int       `json:"mnc"`
+	MCC           int       `json:"mcc"`
+	Operator      string    `json:"operator"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 // ScanConfig holds configuration for DNS scanning
 type ScanConfig struct {
-	ParentDomain string
-	Subdomains   []string
-	QueryDelay   time.Duration
-	Concurrency  int
-	DatabasePath string
-	MCCMNCSource string
-	Verbose      bool
+	ParentDomain   string
+	Subdomains     []string
+	DomainSuffixes map[string]string
+	QueryDelay     time.Duration
+	Concurrency    int
+	DatabasePath   string
+	MCCMNCSource   string
+	Verbose        bool
 }
 
 // PingConfig holds configuration for ping operations

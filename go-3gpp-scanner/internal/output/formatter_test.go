@@ -55,13 +55,16 @@ func TestExportResultsCSV(t *testing.T) {
 
 	results := []models.DNSResult{
 		{
-			FQDN:      "ims.mnc001.mcc310.pub.3gppnetwork.org",
-			IPs:       []string{"192.0.2.1", "192.0.2.2"},
-			Subdomain: "ims",
-			MNC:       1,
-			MCC:       310,
-			Operator:  "Verizon",
-			Timestamp: time.Now(),
+			FQDN:          "ims.mnc001.mcc310.pub.3gppnetwork.org",
+			IPs:           []string{"192.0.2.1", "192.0.2.2"},
+			Subdomain:     "ims",
+			ParentDomain:  "pub.3gppnetwork.org",
+			DomainProfile: "3gpp-public",
+			ServiceClass:  "IMS/VoLTE",
+			MNC:           1,
+			MCC:           310,
+			Operator:      "Verizon",
+			Timestamp:     time.Now(),
 		},
 	}
 
@@ -88,6 +91,9 @@ func TestExportResultsCSV(t *testing.T) {
 	// Check for header
 	if !contains(string(content), "FQDN") {
 		t.Errorf("CSV header does not contain 'FQDN'")
+	}
+	if !contains(string(content), "DomainProfile") {
+		t.Errorf("CSV header does not contain 'DomainProfile'")
 	}
 }
 

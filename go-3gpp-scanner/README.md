@@ -6,7 +6,8 @@ This is a complete Go port of the Python-based toolkit, consolidating **5 Python
 
 ## Features
 
-- **DNS Enumeration**: Scan multiple 3GPP service types (ims, epdg.epc, bsf, gan, xcap.ims) across global MCC-MNC combinations
+- **DNS Enumeration**: Scan multiple 3GPP service types (ims, epdg.epc, bsf, gan, xcap.ims, 5G core functions) across global MCC-MNC combinations
+- **Security Profiles**: Target public 3GPP, 5G core, or security-sensitive GSMA roaming services with built-in standards metadata
 - **High Performance**: Concurrent DNS resolution with configurable worker pools and rate limiting
 - **Connectivity Testing**: Dual-mode pinger supporting ICMP (requires root) and TCP connectivity checks
 - **Database Integration**: SQLite database compatible with Python version for storing discovered FQDNs
@@ -140,6 +141,16 @@ Error: --concurrency must be positive
 3gpp-scanner scan --mode=custom --subdomains=ims,bsf
 ```
 
+**Scan 5G SEPP/N32 exposure candidates:**
+```bash
+3gpp-scanner scan --profile=5g --mode=sepp
+```
+
+**Scan security-sensitive public and 5G services:**
+```bash
+3gpp-scanner scan --profile=security --output=security-results.csv
+```
+
 **Scan and save to database:**
 ```bash
 3gpp-scanner scan --mode=all --db=database.db
@@ -159,7 +170,8 @@ Error: --concurrency must be positive
 ```
 
 **Scan command flags:**
-- `--mode, -m`: Scan mode (all, epdg, ims, bsf, gan, xcap, custom)
+- `--mode, -m`: Scan mode (all, epdg, ims, bsf, gan, xcap, nrf, sepp, nssf, ausf, udm, amf, smf, custom)
+- `--profile`: Domain profile (public, 5g, security, all)
 - `--subdomains`: Comma-separated subdomain list (for custom mode)
 - `--db`: Database file path for storing results
 - `--output, -o`: Output file (supports .json, .csv, .txt)
@@ -266,12 +278,18 @@ The scanner enumerates these 3GPP service types:
 - **bsf**: Bootstrapping Server Function
 - **gan**: Generic Access Network
 - **xcap.ims**: XML Configuration Access Protocol
+- **nrf.5gc**: 5G Network Repository Function
+- **sepp.5gc**: 5G Security Edge Protection Proxy for N32 roaming boundaries
+- **nssf.5gc**: 5G Network Slice Selection Function
+- **ausf.5gc / udm.5gc**: 5G authentication and subscriber data functions
+- **amf.5gc / smf.5gc**: 5G mobility and session control functions
 
 ### FQDN Pattern
 
-FQDNs are constructed using the format:
+FQDNs are constructed using profile-specific public DNS formats:
 ```
 {subdomain}.mnc{NNN}.mcc{MMM}.pub.3gppnetwork.org
+{subdomain}.mnc{NNN}.mcc{MMM}.3gppnetwork.org
 ```
 
 Where:
@@ -279,7 +297,18 @@ Where:
 - `{NNN}`: Zero-padded 3-digit MNC (Mobile Network Code)
 - `{MMM}`: Zero-padded 3-digit MCC (Mobile Country Code)
 
-Example: `epdg.epc.mnc001.mcc310.pub.3gppnetwork.org`
+Examples:
+- `epdg.epc.mnc001.mcc310.pub.3gppnetwork.org`
+- `sepp.5gc.mnc001.mcc310.3gppnetwork.org`
+
+### Security Metadata
+
+DNS results include defensive classification fields in JSON/CSV/database metadata:
+
+- `domain_profile`: `3gpp-public` or `3gpp-5g`
+- `service_class`: VoWiFi ingress, IMS/VoLTE, 5G roaming security edge, and related classes
+- `standards`: relevant 3GPP/GSMA references such as TS 23.003, TS 33.501, IR.88, IR.92
+- `security_focus`: suggested defensive review focus for the discovered service
 
 ### Database Schema
 
@@ -295,6 +324,16 @@ CREATE TABLE operators (
 CREATE TABLE available_fqdns (
     operator TEXT,
     fqdn TEXT
+);
+
+CREATE TABLE fqdn_security_metadata (
+    fqdn TEXT PRIMARY KEY,
+    parent_domain TEXT,
+    domain_profile TEXT,
+    service_class TEXT,
+    standards TEXT,
+    security_focus TEXT,
+    last_classification TIMESTAMP
 );
 ```
 
@@ -430,6 +469,10 @@ This toolkit performs **authorized reconnaissance** on mobile operator infrastru
 - ✅ Publicly resolvable DNS queries (no authorization bypass)
 - ✅ Used for security research and defensive assessments
 - ✅ Educational purposes and infrastructure mapping
+- ✅ Standards-aware context for 3GPP TS 23.003, 3GPP TS 33.501, and GSMA roaming/security references
+
+For future security ideas such as DNSSEC, IPv6/AAAA, certificate transparency,
+ASN/GeoIP, and ETSI/NFV metadata enrichment, see the contribution roadmap below.
 
 **Use responsibly** and only for:
 - Authorized security testing
@@ -487,6 +530,11 @@ You can use both toolkits interchangeably!
 Improvements welcome! Areas for contribution:
 
 - [ ] IPv6 (AAAA record) support
+- [x] Security profiles and service classification metadata
+- [ ] DNSSEC validation status
+- [ ] Certificate transparency enrichment
+- [ ] Passive ASN/GeoIP enrichment for GRX/IPX and public Internet boundary review
+- [ ] ETSI/NFV service metadata mapping for virtualized core deployments
 - [ ] Additional output formats
 - [x] Built-in help with usage examples
 - [x] Flag validation with helpful error messages

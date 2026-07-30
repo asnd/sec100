@@ -71,6 +71,16 @@ func (db *DB) InsertResults(results []models.DNSResult) error {
 	}
 	defer fqdnStmt.Close()
 
+	metadataStmt, err := tx.Prepare(`
+		INSERT OR REPLACE INTO fqdn_security_metadata
+		(fqdn, parent_domain, domain_profile, service_class, standards, security_focus, last_classification)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare metadata statement: %w", err)
+	}
+	defer metadataStmt.Close()
+
 	// Track inserted operators to avoid duplicates
 	operatorSeen := make(map[string]bool)
 
@@ -90,6 +100,19 @@ func (db *DB) InsertResults(results []models.DNSResult) error {
 		_, err = fqdnStmt.Exec(result.Operator, result.FQDN)
 		if err != nil {
 			return fmt.Errorf("failed to insert fqdn: %w", err)
+		}
+
+		_, err = metadataStmt.Exec(
+			result.FQDN,
+			result.ParentDomain,
+			result.DomainProfile,
+			result.ServiceClass,
+			result.Standards,
+			result.SecurityFocus,
+			result.Timestamp,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert security metadata for %s: %w", result.FQDN, err)
 		}
 	}
 

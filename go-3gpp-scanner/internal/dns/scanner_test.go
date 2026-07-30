@@ -2,6 +2,7 @@ package dns
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,14 +62,73 @@ func TestBuildFQDN(t *testing.T) {
 			mcc:       460,
 			expected:  "xcap.ims.mnc000.mcc460.pub.3gppnetwork.org",
 		},
+		{
+			subdomain: "sepp.5gc",
+			mnc:       1,
+			mcc:       310,
+			expected:  "sepp.5gc.mnc001.mcc310.3gppnetwork.org",
+		},
 	}
 
 	for _, tt := range tests {
-		result := BuildFQDN(tt.subdomain, tt.mnc, tt.mcc, "pub.3gppnetwork.org")
+		parentDomain := "pub.3gppnetwork.org"
+		if tt.subdomain == "sepp.5gc" {
+			parentDomain = "3gppnetwork.org"
+		}
+		result := BuildFQDN(tt.subdomain, tt.mnc, tt.mcc, parentDomain)
 		if result != tt.expected {
 			t.Errorf("BuildFQDN(%s, %d, %d) = %s, expected %s",
 				tt.subdomain, tt.mnc, tt.mcc, result, tt.expected)
 		}
+	}
+}
+
+func TestClassifyService(t *testing.T) {
+	tests := []struct {
+		name                  string
+		subdomain             string
+		parentDomain          string
+		expectedProfile       string
+		expectedServiceClass  string
+		expectedSecurityFocus string
+		expectedStandard      string
+	}{
+		{
+			name:                  "epdg public classification",
+			subdomain:             "epdg.epc",
+			parentDomain:          "pub.3gppnetwork.org",
+			expectedProfile:       "3gpp-public",
+			expectedServiceClass:  "VoWiFi ingress",
+			expectedSecurityFocus: "Wi-Fi calling edge and IPsec gateway exposure",
+			expectedStandard:      "GSMA IR.51",
+		},
+		{
+			name:                  "sepp 5g classification",
+			subdomain:             "sepp.5gc",
+			parentDomain:          "3gppnetwork.org",
+			expectedProfile:       "3gpp-5g",
+			expectedServiceClass:  "5G roaming security edge",
+			expectedSecurityFocus: "N32 interconnect and roaming security boundary exposure",
+			expectedStandard:      "GSMA IR.88",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ClassifyService(tt.subdomain, tt.parentDomain)
+			if result.DomainProfile != tt.expectedProfile {
+				t.Errorf("DomainProfile = %s, expected %s", result.DomainProfile, tt.expectedProfile)
+			}
+			if result.ServiceClass != tt.expectedServiceClass {
+				t.Errorf("ServiceClass = %s, expected %s", result.ServiceClass, tt.expectedServiceClass)
+			}
+			if result.SecurityFocus != tt.expectedSecurityFocus {
+				t.Errorf("SecurityFocus = %s, expected %s", result.SecurityFocus, tt.expectedSecurityFocus)
+			}
+			if !strings.Contains(result.Standards, tt.expectedStandard) {
+				t.Errorf("Standards = %s, expected to contain %s", result.Standards, tt.expectedStandard)
+			}
+		})
 	}
 }
 

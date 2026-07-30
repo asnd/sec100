@@ -36,6 +36,7 @@ var (
 	scanConcurrency int
 	scanDelay       int
 	scanMCCMNCFile  string
+	scanProfile     string
 
 	// Ping command flags
 	pingFile    string
@@ -123,26 +124,30 @@ func scanCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "Scan 3GPP network infrastructure via DNS",
-		Long: `Enumerate 3GPP network subdomains (ePDG, IMS, BSF, GAN, XCAP) across
-global MCC-MNC combinations to identify exposed telecom infrastructure.`,
+		Long: `Enumerate 3GPP network subdomains (ePDG, IMS, BSF, GAN, XCAP, 5G core)
+across global MCC-MNC combinations to identify exposed telecom infrastructure.`,
 		Example: `  # Scan only ePDG endpoints
   3gpp-scanner scan --mode=epdg
 
   # Scan all types and save to database with high concurrency
   3gpp-scanner scan --mode=all --db=database.db --concurrency=20
 
-  # Scan custom subdomains with rate limiting
-  3gpp-scanner scan --mode=custom --subdomains=ims,bsf --delay=250`,
+  # Scan 5G SEPP/N32 exposure candidates
+  3gpp-scanner scan --profile=5g --mode=sepp
+
+  # Scan security-sensitive public and 5G services
+  3gpp-scanner scan --profile=security --delay=250`,
 		RunE: runScan,
 	}
 
-	cmd.Flags().StringVarP(&scanMode, "mode", "m", "all", "Scan mode: all, epdg, ims, bsf, gan, xcap, custom")
+	cmd.Flags().StringVarP(&scanMode, "mode", "m", "all", "Scan mode: all, epdg, ims, bsf, gan, xcap, nrf, sepp, nssf, ausf, udm, amf, smf, custom")
 	cmd.Flags().StringVar(&scanSubdomains, "subdomains", "", "Custom subdomain list (comma-separated, for mode=custom)")
 	cmd.Flags().StringVar(&scanDB, "db", "", "Database file path (if set, results will be saved to SQLite)")
 	cmd.Flags().StringVarP(&scanOutput, "output", "o", "", "Output file (json, csv, or txt)")
 	cmd.Flags().IntVarP(&scanConcurrency, "concurrency", "c", 10, "Number of concurrent DNS queries")
 	cmd.Flags().IntVar(&scanDelay, "delay", 500, "Delay between queries in milliseconds")
 	cmd.Flags().StringVar(&scanMCCMNCFile, "mccmnc-file", "", "Use local MCC-MNC JSON file instead of fetching")
+	cmd.Flags().StringVar(&scanProfile, "profile", "public", "Domain profile: public, 5g, security, or all")
 
 	return cmd
 }
@@ -358,9 +363,21 @@ func validateScanFlags() error {
 	if scanMode == "custom" && scanSubdomains == "" {
 		return fmt.Errorf("--subdomains required for custom mode")
 	}
-	validModes := map[string]bool{"all": true, "epdg": true, "ims": true, "bsf": true, "gan": true, "xcap": true, "custom": true}
+	validModes := map[string]bool{
+		"all": true, "epdg": true, "ims": true, "bsf": true, "gan": true, "xcap": true,
+		"nrf": true, "sepp": true, "nssf": true, "ausf": true, "udm": true, "amf": true, "smf": true,
+		"custom": true,
+	}
 	if !validModes[scanMode] {
 		return fmt.Errorf("invalid mode: %s", scanMode)
+	}
+	profile := scanProfile
+	if profile == "" {
+		profile = "public"
+	}
+	validProfiles := map[string]bool{"public": true, "5g": true, "security": true, "all": true}
+	if !validProfiles[profile] {
+		return fmt.Errorf("invalid profile: %s", profile)
 	}
 	if scanConcurrency <= 0 {
 		return fmt.Errorf("--concurrency must be positive")
@@ -420,6 +437,136 @@ func validateStatsFlags() error {
 	return nil
 }
 
+type scanTarget struct {
+	subdomain    string
+	parentDomain string
+}
+
+// scanModeAliases maps short CLI mode names to their full DNS subdomain labels.
+var scanModeAliases = map[string]string{
+	"ims":  "ims",
+	"bsf":  "bsf",
+	"gan":  "gan",
+	"epdg": "epdg.epc",
+	"xcap": "xcap.ims",
+	"nrf":  "nrf.5gc",
+	"sepp": "sepp.5gc",
+	"nssf": "nssf.5gc",
+	"ausf": "ausf.5gc",
+	"udm":  "udm.5gc",
+	"amf":  "amf.5gc",
+	"smf":  "smf.5gc",
+}
+
+var publicTargets = []scanTarget{
+	{subdomain: "ims", parentDomain: "pub.3gppnetwork.org"},
+	{subdomain: "epdg.epc", parentDomain: "pub.3gppnetwork.org"},
+	{subdomain: "bsf", parentDomain: "pub.3gppnetwork.org"},
+	{subdomain: "gan", parentDomain: "pub.3gppnetwork.org"},
+	{subdomain: "xcap.ims", parentDomain: "pub.3gppnetwork.org"},
+}
+
+var fiveGTargets = []scanTarget{
+	{subdomain: "nrf.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "sepp.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "nssf.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "ausf.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "udm.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "amf.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "smf.5gc", parentDomain: "3gppnetwork.org"},
+}
+
+var securityTargets = []scanTarget{
+	{subdomain: "epdg.epc", parentDomain: "pub.3gppnetwork.org"},
+	{subdomain: "bsf", parentDomain: "pub.3gppnetwork.org"},
+	{subdomain: "sepp.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "nrf.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "ausf.5gc", parentDomain: "3gppnetwork.org"},
+	{subdomain: "udm.5gc", parentDomain: "3gppnetwork.org"},
+}
+
+func scanTargets(profile, mode, customSubdomains string) ([]string, map[string]string, error) {
+	targets := targetsForProfile(profile)
+	if len(targets) == 0 {
+		return nil, nil, fmt.Errorf("invalid profile: %s", profile)
+	}
+
+	if mode == "custom" {
+		targets = customTargets(profile, customSubdomains)
+		if len(targets) == 0 {
+			return nil, nil, fmt.Errorf("--subdomains must include at least one value")
+		}
+	} else if mode != "all" {
+		subdomain := mode
+		if alias, ok := scanModeAliases[mode]; ok {
+			subdomain = alias
+		}
+
+		target, ok := findTarget(targets, subdomain)
+		if !ok {
+			return nil, nil, fmt.Errorf("mode %q is not available for profile %q", mode, profile)
+		}
+		targets = []scanTarget{target}
+	}
+
+	subdomains := make([]string, 0, len(targets))
+	domainSuffixes := make(map[string]string, len(targets))
+	for _, target := range targets {
+		subdomains = append(subdomains, target.subdomain)
+		domainSuffixes[target.subdomain] = target.parentDomain
+	}
+
+	return subdomains, domainSuffixes, nil
+}
+
+func targetsForProfile(profile string) []scanTarget {
+	switch profile {
+	case "public":
+		return publicTargets
+	case "5g":
+		return fiveGTargets
+	case "security":
+		return securityTargets
+	case "all":
+		targets := make([]scanTarget, 0, len(publicTargets)+len(fiveGTargets))
+		targets = append(targets, publicTargets...)
+		return append(targets, fiveGTargets...)
+	default:
+		return nil
+	}
+}
+
+func customTargets(profile, customSubdomains string) []scanTarget {
+	parts := strings.Split(customSubdomains, ",")
+	targets := make([]scanTarget, 0, len(parts))
+	profileTargets := targetsForProfile(profile)
+	for _, part := range parts {
+		subdomain := strings.TrimSpace(part)
+		if subdomain == "" {
+			continue
+		}
+		if target, ok := findTarget(profileTargets, subdomain); ok {
+			targets = append(targets, target)
+			continue
+		}
+		parentDomain := "pub.3gppnetwork.org"
+		if profile == "5g" || strings.HasSuffix(subdomain, ".5gc") {
+			parentDomain = "3gppnetwork.org"
+		}
+		targets = append(targets, scanTarget{subdomain: subdomain, parentDomain: parentDomain})
+	}
+	return targets
+}
+
+func findTarget(targets []scanTarget, subdomain string) (scanTarget, bool) {
+	for _, target := range targets {
+		if target.subdomain == subdomain {
+			return target, true
+		}
+	}
+	return scanTarget{}, false
+}
+
 // Scan command implementation
 func runScan(cmd *cobra.Command, args []string) error {
 	// Validate flags
@@ -427,33 +574,19 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Determine subdomains based on mode
-	var subdomains []string
-	switch scanMode {
-	case "all":
-		subdomains = []string{"ims", "epdg.epc", "bsf", "gan", "xcap.ims"}
-	case "epdg":
-		subdomains = []string{"epdg.epc"}
-	case "ims":
-		subdomains = []string{"ims"}
-	case "bsf":
-		subdomains = []string{"bsf"}
-	case "gan":
-		subdomains = []string{"gan"}
-	case "xcap":
-		subdomains = []string{"xcap.ims"}
-	case "custom":
-		subdomains = strings.Split(scanSubdomains, ",")
+	// Determine subdomains and parent domains based on mode/profile
+	subdomains, domainSuffixes, err := scanTargets(scanProfile, scanMode, scanSubdomains)
+	if err != nil {
+		return err
 	}
 
 	if !quiet {
-		fmt.Printf("Starting scan with mode=%s, subdomains=%v\n", scanMode, subdomains)
+		fmt.Printf("Starting scan with profile=%s, mode=%s, subdomains=%v\n", scanProfile, scanMode, subdomains)
 	}
 
 	// Fetch MCC-MNC list
 	f := fetcher.NewFetcher("", ".", 24*time.Hour, verbose)
 	var entries []models.MCCMNCEntry
-	var err error
 
 	if scanMCCMNCFile != "" {
 		entries, err = f.FetchFromFile(scanMCCMNCFile)
@@ -471,11 +604,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 
 	// Configure scanner
 	config := &models.ScanConfig{
-		ParentDomain: "pub.3gppnetwork.org",
-		Subdomains:   subdomains,
-		QueryDelay:   time.Duration(scanDelay) * time.Millisecond,
-		Concurrency:  scanConcurrency,
-		Verbose:      verbose,
+		ParentDomain:   "pub.3gppnetwork.org",
+		Subdomains:     subdomains,
+		DomainSuffixes: domainSuffixes,
+		QueryDelay:     time.Duration(scanDelay) * time.Millisecond,
+		Concurrency:    scanConcurrency,
+		Verbose:        verbose,
 	}
 
 	scanner := dns.NewScanner(config)

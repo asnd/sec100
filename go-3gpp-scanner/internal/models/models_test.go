@@ -7,13 +7,16 @@ import (
 
 func TestDNSResult(t *testing.T) {
 	result := DNSResult{
-		FQDN:      "ims.mnc001.mcc310.pub.3gppnetwork.org",
-		IPs:       []string{"192.0.2.1", "192.0.2.2"},
-		Subdomain: "ims",
-		MNC:       1,
-		MCC:       310,
-		Operator:  "Verizon",
-		Timestamp: time.Now(),
+		FQDN:          "ims.mnc001.mcc310.pub.3gppnetwork.org",
+		IPs:           []string{"192.0.2.1", "192.0.2.2"},
+		Subdomain:     "ims",
+		ParentDomain:  "pub.3gppnetwork.org",
+		DomainProfile: "3gpp-public",
+		ServiceClass:  "IMS/VoLTE",
+		MNC:           1,
+		MCC:           310,
+		Operator:      "Verizon",
+		Timestamp:     time.Now(),
 	}
 
 	if result.FQDN != "ims.mnc001.mcc310.pub.3gppnetwork.org" {
@@ -30,6 +33,10 @@ func TestDNSResult(t *testing.T) {
 
 	if result.MCC != 310 {
 		t.Errorf("Expected MCC 310, got %d", result.MCC)
+	}
+
+	if result.DomainProfile != "3gpp-public" {
+		t.Errorf("Expected DomainProfile '3gpp-public', got %s", result.DomainProfile)
 	}
 }
 
@@ -81,11 +88,12 @@ func TestMCCMNCEntry(t *testing.T) {
 
 func TestScanConfig(t *testing.T) {
 	config := &ScanConfig{
-		ParentDomain: "pub.3gppnetwork.org",
-		Subdomains:   []string{"ims", "epdg.epc"},
-		QueryDelay:   500 * time.Millisecond,
-		Concurrency:  10,
-		Verbose:      false,
+		ParentDomain:   "pub.3gppnetwork.org",
+		Subdomains:     []string{"ims", "epdg.epc"},
+		DomainSuffixes: map[string]string{"ims": "pub.3gppnetwork.org"},
+		QueryDelay:     500 * time.Millisecond,
+		Concurrency:    10,
+		Verbose:        false,
 	}
 
 	if config.ParentDomain != "pub.3gppnetwork.org" {
@@ -98,6 +106,10 @@ func TestScanConfig(t *testing.T) {
 
 	if config.Concurrency != 10 {
 		t.Errorf("Expected Concurrency 10, got %d", config.Concurrency)
+	}
+
+	if config.DomainSuffixes["ims"] != "pub.3gppnetwork.org" {
+		t.Errorf("Expected DomainSuffixes to include ims parent domain")
 	}
 }
 
