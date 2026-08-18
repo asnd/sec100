@@ -798,14 +798,8 @@ func runProbe(cmd *cobra.Command, args []string) error {
 			probeDB, probeWorkers, probeTimeout)
 	}
 
-	// Probe a small set of known well-formed endpoints from available_fqdns.
-	// Full multi-IP worker fan-out matches Python; here we exercise the package
-	// against FQDNs already discovered so the command is not a no-op.
-	fqdns, err := db.QueryByOperator("") // may return empty; fall through
-	if err != nil || len(fqdns) == 0 {
-		// Query without filter is not supported; use GetAllOperators path instead.
-		_ = fqdns
-	}
+	// Probe FQDNs already discovered so the command is not a no-op.
+	// Full multi-IP worker fan-out matches the Python toolkit more closely.
 	ops, err := db.GetAllOperators()
 	if err != nil {
 		return err
@@ -944,20 +938,24 @@ func runDiameter(cmd *cobra.Command, args []string) error {
 			diameterDB, len(ops), diameterWorkers)
 	}
 
-	total := 0
+	var allRealms []diameter.DiameterRealm
 	for _, op := range ops {
 		mnc, _ := strconv.Atoi(op.MNC)
 		mcc, _ := strconv.Atoi(op.MCC)
 		realms := scanner.ProbeOperator(ctx, mnc, mcc, op.Operator, op.CountryName)
-		total += len(realms)
+		allRealms = append(allRealms, realms...)
 		if verbose {
 			for _, r := range realms {
 				fmt.Printf("realm=%s naptr=%v iface=%s\n", r.Realm, r.NAPTRFound, r.Interface)
 			}
 		}
 	}
+	stored, err := db.InsertDiameterRealms(allRealms)
+	if err != nil {
+		return fmt.Errorf("persist diameter realms: %w", err)
+	}
 	if !quiet {
-		fmt.Printf("Diameter realms discovered: %d\n", total)
+		fmt.Printf("Diameter realms discovered: %d (stored %d)\n", len(allRealms), stored)
 	}
 	return nil
 }

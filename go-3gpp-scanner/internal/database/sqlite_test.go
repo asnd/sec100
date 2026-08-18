@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"3gpp-scanner/internal/diameter"
 	"3gpp-scanner/internal/discover"
 	"3gpp-scanner/internal/report"
 )
@@ -69,6 +70,29 @@ func TestSchemaAndCollect(t *testing.T) {
 	}
 	if n == 0 {
 		t.Fatal("expected upserts")
+	}
+
+	// Diameter realm + peer persistence
+	stored, err := db.InsertDiameterRealms([]diameter.DiameterRealm{{
+		MNC: 1, MCC: 310, Operator: "TestOp", CountryName: "US",
+		Realm: "epc.mnc001.mcc310.3gppnetwork.org", NAPTRFound: true,
+		NAPTRServices: "aaa+ap23", Interface: "S6a (HSS/MME)",
+		Peers: []diameter.DiameterPeer{{
+			Host: "hss.example", Port: 3868, Transport: "tcp", ResolvedIPs: "9.9.9.9",
+		}},
+	}})
+	if err != nil {
+		t.Fatalf("InsertDiameterRealms: %v", err)
+	}
+	if stored != 1 {
+		t.Fatalf("expected 1 realm stored, got %d", stored)
+	}
+	var peerCount int
+	if err := db.conn.QueryRow(`SELECT COUNT(*) FROM diameter_peers WHERE host='hss.example'`).Scan(&peerCount); err != nil {
+		t.Fatal(err)
+	}
+	if peerCount != 1 {
+		t.Fatalf("expected peer row, got %d", peerCount)
 	}
 	loaded, err := db.LoadRiskFindings()
 	if err != nil {

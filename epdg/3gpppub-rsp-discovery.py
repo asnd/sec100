@@ -220,25 +220,21 @@ def fetch_tls_cert(hostname: str, port: int = 443, timeout: int = 8) -> dict:
                 raw = ssock.getpeercert() or {}
                 cert_bin = ssock.getpeercert(binary_form=True)
                 if not raw and cert_bin:
-                    # Reuse TLS probe helper when available; otherwise local decode.
+                    # Hyphenated script names are not importable modules; decode DER
+                    # locally. Uses CPython PEM round-trip (stdlib-only; no cryptography).
+                    import os
+                    import tempfile
+                    pem = ssl.DER_cert_to_PEM_cert(cert_bin)
+                    fd, path = tempfile.mkstemp(suffix=".pem")
                     try:
-                        from importlib import import_module
-                        tls_mod = import_module("3gpppub-tls-ike-probe")  # type: ignore
-                        raw = tls_mod.decode_peer_cert(cert_bin)
-                    except Exception:
-                        import os
-                        import tempfile
-                        pem = ssl.DER_cert_to_PEM_cert(cert_bin)
-                        fd, path = tempfile.mkstemp(suffix=".pem")
+                        with os.fdopen(fd, "w", encoding="ascii") as fh:
+                            fh.write(pem)
+                        raw = ssl._ssl._test_decode_cert(path)  # type: ignore[attr-defined]
+                    finally:
                         try:
-                            with os.fdopen(fd, "w", encoding="ascii") as fh:
-                                fh.write(pem)
-                            raw = ssl._ssl._test_decode_cert(path)  # type: ignore[attr-defined]
-                        finally:
-                            try:
-                                os.unlink(path)
-                            except OSError:
-                                pass
+                            os.unlink(path)
+                        except OSError:
+                            pass
                 if not raw:
                     return {}
                 # Subject

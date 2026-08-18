@@ -2,11 +2,90 @@ package database
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"3gpp-scanner/internal/diameter"
 	"3gpp-scanner/internal/discover"
 	"3gpp-scanner/internal/report"
 )
+
+// InsertDiameterRealms upserts Diameter realm rows and associated peers.
+func (db *DB) InsertDiameterRealms(realms []diameter.DiameterRealm) (int, error) {
+	if len(realms) == 0 {
+		return 0, nil
+	}
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	realmStmt, err := tx.Prepare(`
+		INSERT INTO diameter_realms
+			(mnc, mcc, operator, country_name, realm, naptr_found, naptr_services, srv_hosts, interface)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(realm) DO UPDATE SET
+			mnc=excluded.mnc,
+			mcc=excluded.mcc,
+			operator=excluded.operator,
+			country_name=excluded.country_name,
+			naptr_found=excluded.naptr_found,
+			naptr_services=excluded.naptr_services,
+			srv_hosts=excluded.srv_hosts,
+			interface=excluded.interface
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer realmStmt.Close()
+
+	peerStmt, err := tx.Prepare(`
+		INSERT INTO diameter_peers
+			(realm, host, port, transport, resolved_ips, operator, country_name, mnc, mcc)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(host, port) DO UPDATE SET
+			realm=excluded.realm,
+			transport=excluded.transport,
+			resolved_ips=excluded.resolved_ips,
+			operator=excluded.operator,
+			country_name=excluded.country_name,
+			mnc=excluded.mnc,
+			mcc=excluded.mcc
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer peerStmt.Close()
+
+	n := 0
+	for _, r := range realms {
+		naptr := 0
+		if r.NAPTRFound {
+			naptr = 1
+		}
+		hosts := make([]string, 0, len(r.Peers))
+		for _, p := range r.Peers {
+			hosts = append(hosts, p.Host+":"+strconv.Itoa(p.Port))
+		}
+		if _, err := realmStmt.Exec(
+			r.MNC, r.MCC, r.Operator, r.CountryName, r.Realm,
+			naptr, r.NAPTRServices, strings.Join(hosts, ","), r.Interface,
+		); err != nil {
+			return n, err
+		}
+		n++
+		for _, p := range r.Peers {
+			if _, err := peerStmt.Exec(
+				r.Realm, p.Host, p.Port, p.Transport, p.ResolvedIPs,
+				r.Operator, r.CountryName, r.MNC, r.MCC,
+			); err != nil {
+				return n, err
+			}
+		}
+	}
+	return n, tx.Commit()
+}
 
 // InsertDiscoveredHosts upserts passive discovery hosts into discovered_hosts.
 func (db *DB) InsertDiscoveredHosts(hosts []discover.DiscoveredHost) (int, error) {
