@@ -157,7 +157,8 @@ def build_rsp_candidates(mnc: int, mcc: int) -> list[tuple[str, str, str]]:
 
     return [
         (f"smdp.{base_pub}",  "SM-DP+",  "dns_pub"),
-        (f"smdp+.{base_pub}", "SM-DP+",  "dns_pub"),
+        # Note: bare '+' is not a valid DNS label; use hyphenated form.
+        (f"smdp-plus.{base_pub}", "SM-DP+",  "dns_pub"),
         (f"smds.{base_pub}",  "SM-DS",   "dns_pub"),
         (f"rsp.{base_pub}",   "unknown", "dns_pub"),
         (f"lpa.{base_pub}",   "SM-DP+",  "dns_pub"),
@@ -206,6 +207,9 @@ def fetch_tls_cert(hostname: str, port: int = 443, timeout: int = 8) -> dict:
     """
     Connect to hostname:port and return a dict with subject, issuer, san fields.
     Returns empty dict on any error.
+
+    Note: with CERT_NONE, getpeercert() returns {} even when a cert was
+    presented. Always decode DER via binary_form=True.
     """
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
@@ -213,7 +217,12 @@ def fetch_tls_cert(hostname: str, port: int = 443, timeout: int = 8) -> dict:
     try:
         with socket.create_connection((hostname, port), timeout=timeout) as sock:
             with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
-                raw = ssock.getpeercert()
+                raw = ssock.getpeercert() or {}
+                cert_bin = ssock.getpeercert(binary_form=True)
+                if not raw and cert_bin:
+                    from tls_cert_util import decode_peer_cert as _decode_peer_cert
+
+                    raw = _decode_peer_cert(cert_bin)
                 if not raw:
                     return {}
                 # Subject
@@ -536,8 +545,14 @@ def load_operators(source: str) -> list[dict]:
     if source.endswith(".db") or (not source.startswith("http") and Path(source).suffix == ".db"):
         conn = sqlite3.connect(source)
         conn.row_factory = sqlite3.Row
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(operators)").fetchall()}
+        country_expr = (
+            "COALESCE(country_name, '') AS countryName"
+            if "country_name" in cols
+            else "'' AS countryName"
+        )
         rows = conn.execute(
-            "SELECT mnc, mcc, operator AS operator, '' AS countryName FROM operators"
+            f"SELECT mnc, mcc, operator AS operator, {country_expr} FROM operators"
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]

@@ -2,15 +2,27 @@ package probe
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"net"
 	"strings"
 	"time"
 )
+
+// KnownIKEVendorIDs maps well-known IKEv2 Vendor-ID payload hex prefixes
+// to human-readable labels (parity with the Python probe).
+var KnownIKEVendorIDs = map[string]string{
+	"4048b7d56ebce885":                 "OpenIKEv2",
+	"afcad71368a1f1c9":                 "DPD-RFC3706",
+	"90cb80913ebb696e":                 "IKE-fragmentation",
+	"4a131c81070358455c5728f20e95452f": "IKE-NAT-T-RFC3947",
+	"3947a0fde8dc4768db34557c2bda31a2": "Cisco-Unity",
+	"12f5f28c457168a9702d9fe274cc0100": "Cisco-VPN-Concentrator",
+	"09002689dfd6b712":                 "XAUTH",
+}
 
 // ProbeConfig holds configuration for probe operations.
 type ProbeConfig struct {
@@ -187,9 +199,106 @@ func (p *Prober) ProbeIKE(ctx context.Context, fqdn, ip string, port int, operat
 	}
 
 	result.Responded = true
-	result.VendorIDs = extractVendorIDs(resp)
+	rawVIDs := extractVendorIDs(resp)
+	result.VendorIDs = labelVendorIDs(rawVIDs)
+	result.WeakCrypto, result.WeakReasons = assessIKEWeakCrypto(resp, result.VendorIDs)
 
 	return result
+}
+
+// MatchIKEVendorID returns a known label for a hex-encoded Vendor-ID payload,
+// or an empty string when the ID is not recognised.
+func MatchIKEVendorID(vidHex string) string {
+	vid := strings.ToLower(strings.TrimSpace(vidHex))
+	for prefix, label := range KnownIKEVendorIDs {
+		if strings.HasPrefix(vid, strings.ToLower(prefix)) {
+			return label
+		}
+	}
+	return ""
+}
+
+// labelVendorIDs replaces raw hex Vendor-IDs with known labels when possible.
+func labelVendorIDs(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, vid := range raw {
+		if label := MatchIKEVendorID(vid); label != "" {
+			out = append(out, label)
+			continue
+		}
+		// Keep a short hex form for unknown IDs.
+		if len(vid) > 32 {
+			out = append(out, vid[:32])
+		} else {
+			out = append(out, vid)
+		}
+	}
+	return out
+}
+
+// assessIKEWeakCrypto applies lightweight heuristics against the IKE_SA_INIT
+// response. Only SA-payload indicators of historically weak ENCR transforms
+// (DES/3DES) are treated as weak crypto. Unknown vendor IDs are intentionally
+// not flagged — that produced HIGH false positives in baseline reports.
+//
+// Returns (weak, reasons).
+func assessIKEWeakCrypto(resp []byte, vendorLabels []string) (bool, []string) {
+	_ = vendorLabels // reserved for future informational tagging
+	var reasons []string
+
+	// Walk payloads looking for SA (33) content that embeds weak transform IDs.
+	// Transform Type 1 (ENCR) IDs: 1=DES-IV64, 2=DES, 3=3DES are historically weak.
+	if containsWeakIKETransforms(resp) {
+		reasons = append(reasons, "weak-encr-transform")
+	}
+
+	return len(reasons) > 0, reasons
+}
+
+// containsWeakIKETransforms scans SA payloads for DES/3DES encryption transforms.
+func containsWeakIKETransforms(resp []byte) bool {
+	if len(resp) < 28 {
+		return false
+	}
+
+	nextPayload := resp[16]
+	offset := 28
+
+	for offset+4 <= len(resp) && nextPayload != 0 {
+		payloadType := nextPayload
+		nextPayload = resp[offset]
+		payloadLen := int(binary.BigEndian.Uint16(resp[offset+2 : offset+4]))
+		if payloadLen < 4 || offset+payloadLen > len(resp) {
+			break
+		}
+
+		// Payload type 33 = Security Association
+		if payloadType == 33 {
+			body := resp[offset+4 : offset+payloadLen]
+			// Heuristic scan for ENCR transform type (0x01) followed by DES/3DES IDs.
+			for i := 0; i+4 < len(body); i++ {
+				// Transform attribute/structure often embeds type byte then transform ID.
+				if body[i] == 0x01 { // potential Transform Type = ENCR
+					// Common layouts place Transform ID one or three bytes later.
+					for _, idOff := range []int{i + 1, i + 3} {
+						if idOff < len(body) {
+							switch body[idOff] {
+							case 1, 2, 3: // DES-IV64, DES, 3DES
+								return true
+							}
+						}
+					}
+				}
+			}
+		}
+
+		offset += payloadLen
+	}
+
+	return false
 }
 
 // FingerprintVendor attempts to identify the telecom vendor from certificate
@@ -265,10 +374,12 @@ func buildIKESAInit() []byte {
 	pkt := make([]byte, totalLen)
 
 	// Initiator SPI – 8 random bytes
-	//nolint:gosec // weak rand is fine for nonce material in a probe
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	for i := 0; i < 8; i++ {
-		pkt[i] = byte(r.Intn(256))
+	if _, err := rand.Read(pkt[0:8]); err != nil {
+		// Extremely unlikely; fall back to time-derived bytes.
+		now := time.Now().UnixNano()
+		for i := 0; i < 8; i++ {
+			pkt[i] = byte(now >> (i * 8))
+		}
 	}
 
 	// Responder SPI – 8 zero bytes (already zero from make)
@@ -291,8 +402,11 @@ func buildIKESAInit() []byte {
 	binary.BigEndian.PutUint16(pkt[30:32], uint16(noncePayloadHdr+nonceDataLen))
 
 	// Nonce data – 20 random bytes
-	for i := 0; i < nonceDataLen; i++ {
-		pkt[32+i] = byte(r.Intn(256))
+	if _, err := rand.Read(pkt[32 : 32+nonceDataLen]); err != nil {
+		now := time.Now().UnixNano()
+		for i := 0; i < nonceDataLen; i++ {
+			pkt[32+i] = byte(now >> ((i % 8) * 8))
+		}
 	}
 
 	return pkt

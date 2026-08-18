@@ -2,6 +2,7 @@ package rsp
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -19,13 +20,16 @@ func TestBuildCandidates(t *testing.T) {
 
 	expectedFQDNs := []string{
 		"smdp." + expectedBase,
-		"smdp+." + expectedBase,
+		"smdp-plus." + expectedBase,
 		"smds." + expectedBase,
 		"rsp." + expectedBase,
 		"lpa." + expectedBase,
 	}
 
 	for i, c := range candidates {
+		if strings.Contains(c.FQDN, "smdp+.") || strings.Contains(c.FQDN, "+") {
+			t.Errorf("invalid DNS label with '+': %s", c.FQDN)
+		}
 		if c.FQDN != expectedFQDNs[i] {
 			t.Errorf("candidate[%d] FQDN: got %q, want %q", i, c.FQDN, expectedFQDNs[i])
 		}

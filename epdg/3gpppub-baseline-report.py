@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import html
 import json
 import logging
 import sqlite3
@@ -47,7 +48,8 @@ CREATE TABLE IF NOT EXISTS risk_findings (
     title        TEXT,
     evidence     TEXT,
     detected_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(operator, finding_type, control_ref)
+    -- Include evidence so multiple distinct findings of the same type are kept
+    UNIQUE(operator, finding_type, control_ref, evidence)
 );
 """
 
@@ -168,24 +170,25 @@ def collect_ike_findings(conn: sqlite3.Connection) -> list[dict]:
         log.debug("Table ike_probes not found — skipping IKE findings")
         return []
 
+    # Align with SCHEMA_TLS_IKE in 3gpppub-tls-ike-probe.py
     rows = conn.execute(
         """
         SELECT operator, mcc, mnc, country_name, fqdn,
-               cipher_suite, transform_ids
+               vendor_ids, weak_reasons
         FROM ike_probes
         WHERE weak_crypto = 1
         """
     ).fetchall()
 
     findings = []
-    for operator, mcc, mnc, country_name, fqdn, cipher_suite, transform_ids in rows:
+    for operator, mcc, mnc, country_name, fqdn, vendor_ids, weak_reasons in rows:
         findings.append({
             "operator":     operator,
             "country_name": country_name,
             "mcc":          mcc,
             "mnc":          mnc,
             "finding_type": "weak_ike_crypto",
-            "evidence":     f"fqdn={fqdn} cipher_suite={cipher_suite} transforms={transform_ids}",
+            "evidence":     f"fqdn={fqdn} vendor_ids={vendor_ids} reasons={weak_reasons}",
         })
 
     log.info("IKE findings collected: %d", len(findings))
@@ -198,11 +201,16 @@ def collect_5gc_findings(conn: sqlite3.Connection) -> list[dict]:
         log.debug("Table fiveg_fqdns not found — skipping 5GC findings")
         return []
 
+    # Prefer resolved_ips (producer schema); fall back if only resolved_ip exists.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(fiveg_fqdns)").fetchall()}
+    ip_col = "resolved_ips" if "resolved_ips" in cols else ("resolved_ip" if "resolved_ip" in cols else "NULL")
+    zone_filter = "WHERE dns_zone = 'pub'" if "dns_zone" in cols else ""
+
     rows = conn.execute(
-        """
-        SELECT operator, mcc, mnc, country_name, fqdn, nf_type, resolved_ip
+        f"""
+        SELECT operator, mcc, mnc, country_name, fqdn, nf_type, {ip_col}
         FROM fiveg_fqdns
-        WHERE dns_zone = 'pub'
+        {zone_filter}
         """
     ).fetchall()
 
@@ -297,23 +305,24 @@ def collect_diameter_findings(conn: sqlite3.Connection) -> list[dict]:
         log.debug("Table diameter_realms not found — skipping Diameter findings")
         return []
 
+    # Align with SCHEMA_DIAMETER (naptr_services, not naptr_records)
     rows = conn.execute(
         """
-        SELECT operator, mcc, mnc, country_name, realm, naptr_records
+        SELECT operator, mcc, mnc, country_name, realm, naptr_services
         FROM diameter_realms
         WHERE naptr_found = 1
         """
     ).fetchall()
 
     findings = []
-    for operator, mcc, mnc, country_name, realm, naptr_records in rows:
+    for operator, mcc, mnc, country_name, realm, naptr_services in rows:
         findings.append({
             "operator":     operator,
             "country_name": country_name,
             "mcc":          mcc,
             "mnc":          mnc,
             "finding_type": "diameter_public",
-            "evidence":     f"realm={realm} naptr_records={naptr_records}",
+            "evidence":     f"realm={realm} naptr_services={naptr_services}",
         })
 
     log.info("Diameter findings collected: %d", len(findings))
@@ -326,9 +335,10 @@ def collect_rsp_findings(conn: sqlite3.Connection) -> list[dict]:
         log.debug("Table rsp_endpoints not found — skipping RSP findings")
         return []
 
+    # Align with SCHEMA_RSP (fqdn / resolved_ips)
     rows = conn.execute(
         """
-        SELECT operator, mcc, mnc, country_name, endpoint, role, resolved_ip
+        SELECT operator, mcc, mnc, country_name, fqdn, role, resolved_ips
         FROM rsp_endpoints
         """
     ).fetchall()
@@ -359,9 +369,10 @@ def collect_ct_findings(conn: sqlite3.Connection) -> list[dict]:
         log.debug("Table discovered_hosts not found — skipping CT findings")
         return []
 
+    # Align with SCHEMA_PASSIVE (fqdn, not hostname)
     rows = conn.execute(
         """
-        SELECT operator, mcc, mnc, country_name, hostname, service_prefix, first_seen
+        SELECT operator, mcc, mnc, country_name, fqdn, service_prefix, first_seen
         FROM discovered_hosts
         WHERE is_new_candidate = 1
         """
@@ -411,13 +422,12 @@ def save_findings(conn: sqlite3.Connection, findings: list[dict]) -> int:
             VALUES
                 (:operator, :country_name, :mcc, :mnc,
                  :control_ref, :finding_type, :severity, :title, :evidence)
-            ON CONFLICT(operator, finding_type, control_ref) DO UPDATE SET
+            ON CONFLICT(operator, finding_type, control_ref, evidence) DO UPDATE SET
                 country_name = excluded.country_name,
                 mcc          = excluded.mcc,
                 mnc          = excluded.mnc,
                 severity     = excluded.severity,
                 title        = excluded.title,
-                evidence     = excluded.evidence,
                 detected_at  = CURRENT_TIMESTAMP
             """,
             {
@@ -686,24 +696,25 @@ def generate_html(findings: list[dict], top_n: int, summary_only: bool) -> str:
     if not summary_only:
         for f in findings[:top_n]:
             mcc_mnc = f"{f['mcc']}-{f['mnc']}" if f["mcc"] and f["mnc"] else ""
-            ev = (f["evidence"] or "")[:120]
+            ev = html.escape((f["evidence"] or "")[:120])
             rows_html += (
                 f"<tr>"
-                f"<td>{badge(f['severity'])}</td>"
-                f"<td>{f['operator'] or ''}</td>"
-                f"<td>{mcc_mnc}</td>"
-                f"<td>{f['control_ref'] or ''}</td>"
-                f"<td>{f['title'] or ''}</td>"
+                f"<td>{badge(html.escape(f['severity'] or ''))}</td>"
+                f"<td>{html.escape(f['operator'] or '')}</td>"
+                f"<td>{html.escape(mcc_mnc)}</td>"
+                f"<td>{html.escape(f['control_ref'] or '')}</td>"
+                f"<td>{html.escape(f['title'] or '')}</td>"
                 f"<td><small>{ev}</small></td>"
                 f"</tr>\n"
             )
 
     summary_rows = "".join(
-        f"<tr><td>{badge(sev)}</td><td>{summary['counts'].get(sev, 0)}</td></tr>"
+        f"<tr><td>{badge(html.escape(sev))}</td>"
+        f"<td>{summary['counts'].get(sev, 0)}</td></tr>"
         for sev in SEVERITY_ORDER
     )
     top_op_rows = "".join(
-        f"<tr><td>{op}</td><td>{score}</td></tr>"
+        f"<tr><td>{html.escape(str(op))}</td><td>{score}</td></tr>"
         for op, score in summary["top_operators"]
     )
 
@@ -811,13 +822,22 @@ def main() -> None:
     if args.collect:
         log.info("Running all collection functions...")
         all_findings: list[dict] = []
-        all_findings.extend(collect_tls_findings(conn))
-        all_findings.extend(collect_ike_findings(conn))
-        all_findings.extend(collect_5gc_findings(conn))
-        all_findings.extend(collect_missing_service_findings(conn))
-        all_findings.extend(collect_diameter_findings(conn))
-        all_findings.extend(collect_rsp_findings(conn))
-        all_findings.extend(collect_ct_findings(conn))
+        collectors = (
+            collect_tls_findings,
+            collect_ike_findings,
+            collect_5gc_findings,
+            collect_missing_service_findings,
+            collect_diameter_findings,
+            collect_rsp_findings,
+            collect_ct_findings,
+        )
+        for collector in collectors:
+            try:
+                all_findings.extend(collector(conn))
+            except Exception as exc:
+                # Isolate collector failures so one broken source table
+                # does not abort the entire --collect pipeline.
+                log.warning("Collector %s failed: %s", collector.__name__, exc)
 
         n = save_findings(conn, all_findings)
         log.info("Saved %d findings to risk_findings.", n)
