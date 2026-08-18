@@ -57,9 +57,17 @@ type Scanner struct {
 }
 
 // NewScanner creates a new Diameter Scanner with the provided configuration.
+// A nil config uses DefaultDiameterConfig().
 func NewScanner(config *DiameterConfig) *Scanner {
+	if config == nil {
+		config = DefaultDiameterConfig()
+	}
+	timeout := config.Timeout
+	if timeout <= 0 {
+		timeout = 3 * time.Second
+	}
 	client := &dns.Client{
-		Timeout: config.Timeout,
+		Timeout: timeout,
 	}
 	return &Scanner{
 		config:    config,
@@ -78,8 +86,12 @@ func DefaultDiameterConfig() *DiameterConfig {
 }
 
 // BuildRealm constructs a 3GPP Diameter realm FQDN from a prefix, MNC, and MCC.
-// Valid prefixes are "epc", "ims", or "mnc" (bare mnc+mcc realm).
+// Valid prefixes are "epc", "ims", or "mnc" (bare mnc+mcc realm without an extra label).
+// Bare "mnc" matches 3GPP TS 23.003: mnc<NNN>.mcc<MMM>.3gppnetwork.org
 func BuildRealm(prefix string, mnc, mcc int) string {
+	if prefix == "" || prefix == "mnc" {
+		return fmt.Sprintf("mnc%03d.mcc%03d.3gppnetwork.org", mnc, mcc)
+	}
 	return fmt.Sprintf("%s.mnc%03d.mcc%03d.3gppnetwork.org", prefix, mnc, mcc)
 }
 
@@ -105,22 +117,30 @@ func (s *Scanner) ProbeOperator(ctx context.Context, mnc, mcc int, operator, cou
 	results := make([]DiameterRealm, 0, len(realmPrefixes))
 	resultsMu := &sync.Mutex{}
 
-	sem := make(chan struct{}, s.config.Workers)
+	workers := s.config.Workers
+	if workers <= 0 {
+		workers = 1
+	}
+	sem := make(chan struct{}, workers)
 	var wg sync.WaitGroup
 
+loop:
 	for _, prefix := range realmPrefixes {
 		select {
 		case <-ctx.Done():
-			break
-		default:
+			break loop
+		case sem <- struct{}{}:
 		}
 
-		sem <- struct{}{}
 		wg.Add(1)
-
 		go func(p string) {
 			defer wg.Done()
 			defer func() { <-sem }()
+
+			// Skip work if cancelled while waiting for a worker slot.
+			if ctx.Err() != nil {
+				return
+			}
 
 			realmFQDN := BuildRealm(p, mnc, mcc)
 			dr := s.probeRealm(ctx, realmFQDN, mnc, mcc, operator, country)
@@ -167,13 +187,14 @@ func (s *Scanner) probeRealm(ctx context.Context, realm string, mnc, mcc int, op
 		}
 
 		// Collect service strings for interface mapping.
-		for _, token := range strings.Fields(naptr.Services) {
+		// miekg/dns exposes the NAPTR service field as Service (singular).
+		for _, token := range strings.Fields(naptr.Service) {
 			serviceTokens = append(serviceTokens, strings.ToLower(token))
 		}
 
 		// Each NAPTR replacement is a potential Diameter peer host.
 		if naptr.Replacement != "" && naptr.Replacement != "." {
-			peer := s.resolvePeer(ctx, naptr.Replacement, naptr.Services, server)
+			peer := s.resolvePeer(ctx, naptr.Replacement, naptr.Service, server)
 			peers = append(peers, peer)
 		}
 	}

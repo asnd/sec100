@@ -33,7 +33,14 @@ func TestBuildRealm(t *testing.T) {
 			prefix:   "mnc",
 			mnc:      1,
 			mcc:      310,
-			expected: "mnc.mnc001.mcc310.3gppnetwork.org",
+			expected: "mnc001.mcc310.3gppnetwork.org",
+		},
+		{
+			name:     "empty prefix is bare realm",
+			prefix:   "",
+			mnc:      15,
+			mcc:      262,
+			expected: "mnc015.mcc262.3gppnetwork.org",
 		},
 		{
 			name:     "three-digit mnc and mcc",
@@ -150,5 +157,19 @@ func TestDefaultDiameterConfig(t *testing.T) {
 	}
 	if cfg.Workers != 10 {
 		t.Errorf("Workers = %d; want 10", cfg.Workers)
+	}
+}
+
+func TestMapInterfaceCaseInsensitive(t *testing.T) {
+	got := MapInterface([]string{"AAA+AP25"})
+	if got != "SWm (ePDG)" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestNewScannerNilConfig(t *testing.T) {
+	s := NewScanner(nil)
+	if s == nil || s.config == nil {
+		t.Fatal("expected defaults")
 	}
 }

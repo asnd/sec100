@@ -161,6 +161,37 @@ def fingerprint_tls_vendor(issuer_cn: str, issuer_o: str, sans: list[str]) -> st
 
 # ── TLS probe ─────────────────────────────────────────────────────────────────
 
+def decode_peer_cert(cert_bin: bytes) -> dict:
+    """
+    Decode a DER-encoded peer certificate into the dict form used by
+    SSLSocket.getpeercert().
+
+    With ssl.CERT_NONE, getpeercert() returns {} even when a cert was
+    presented. binary_form=True still returns DER bytes, which we decode
+    via the stdlib helper (no third-party crypto dependency).
+    """
+    if not cert_bin:
+        return {}
+    import os
+    import tempfile
+
+    pem = ssl.DER_cert_to_PEM_cert(cert_bin)
+    fd, path = tempfile.mkstemp(suffix=".pem")
+    try:
+        with os.fdopen(fd, "w", encoding="ascii") as fh:
+            fh.write(pem)
+        # Private but stable helper used across CPython versions.
+        return ssl._ssl._test_decode_cert(path)  # type: ignore[attr-defined]
+    except Exception as exc:
+        log.debug("Failed to decode peer certificate DER: %s", exc)
+        return {}
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def probe_tls(fqdn: str, ip: str, port: int, timeout: float) -> Optional[Dict]:
     """
     Open a TLS connection to ip:port and extract certificate metadata.
@@ -174,8 +205,11 @@ def probe_tls(fqdn: str, ip: str, port: int, timeout: float) -> Optional[Dict]:
         raw_sock = socket.create_connection((ip, port), timeout=timeout)
         tls_sock = ctx.wrap_socket(raw_sock, server_hostname=fqdn)
         try:
-            cert_dict = tls_sock.getpeercert()
-            cert_bin  = tls_sock.getpeercert(binary_form=True)
+            # CERT_NONE makes the validated dict empty; always use DER bytes.
+            cert_bin = tls_sock.getpeercert(binary_form=True)
+            cert_dict = tls_sock.getpeercert() or {}
+            if not cert_dict and cert_bin:
+                cert_dict = decode_peer_cert(cert_bin)
         finally:
             tls_sock.close()
     except Exception as exc:
@@ -222,7 +256,6 @@ def probe_tls(fqdn: str, ip: str, port: int, timeout: float) -> Optional[Dict]:
     # Key info is not always available from getpeercert(); best-effort
     key_type = None
     key_bits = None
-    # We could decode cert_bin with cryptography lib, but keep stdlib-only here
 
     return {
         "subject":       subject_str,
@@ -291,15 +324,18 @@ def probe_ike(fqdn: str, ip: str, port: int, timeout: float) -> Dict:
     }
 
     packet = _build_ike_sa_init()
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.settimeout(timeout)
         sock.sendto(packet, (ip, port))
         data, _ = sock.recvfrom(4096)
-        sock.close()
     except Exception as exc:
         log.debug("IKE %s:%d (%s) no response: %s", fqdn, port, ip, exc)
         return result
+    finally:
+        if sock is not None:
+            sock.close()
 
     # Validate: byte[17] must be 0x20 (IKEv2 version field in the response header)
     if len(data) < 28 or data[17] != 0x20:
@@ -309,8 +345,7 @@ def probe_ike(fqdn: str, ip: str, port: int, timeout: float) -> Dict:
     result["responded"] = 1
 
     # Walk response payloads to harvest Vendor-ID payloads (type 43)
-    # IKEv2 header is 28 bytes; payload chain starts at byte 28
-    # First payload type is in byte 16 of the header (next_payload field)
+    # and look for weak ENCR transforms in SA payloads (type 33).
     found_vendor_labels: List[str] = []
     weak_reasons: List[str] = []
 
@@ -322,7 +357,6 @@ def probe_ike(fqdn: str, ip: str, port: int, timeout: float) -> Dict:
             break
         current_type = next_payload
         next_payload = data[offset]
-        # critical = data[offset + 1]
         payload_len  = struct.unpack(">H", data[offset + 2: offset + 4])[0]
         if payload_len < 4 or offset + payload_len > len(data):
             break
@@ -333,19 +367,19 @@ def probe_ike(fqdn: str, ip: str, port: int, timeout: float) -> Dict:
             vid_hex = payload_data.hex()
             label   = _match_vendor_id(vid_hex)
             found_vendor_labels.append(label if label else vid_hex[:32])
+        elif current_type == 33:  # Security Association
+            # Heuristic: ENCR transform type 1 with DES/3DES IDs 1/2/3.
+            for i in range(max(0, len(payload_data) - 1)):
+                if payload_data[i] == 0x01:
+                    for id_off in (i + 1, i + 3):
+                        if id_off < len(payload_data) and payload_data[id_off] in (1, 2, 3):
+                            if "weak-encr-transform" not in weak_reasons:
+                                weak_reasons.append("weak-encr-transform")
 
         offset += payload_len
 
     result["vendor_ids"] = ", ".join(found_vendor_labels)
-
-    # Simple weak-crypto heuristic: DES/3DES in SA payload (type 33)
-    # Full SA parsing is complex; flag if no recognised strong vendor IDs found
-    # and the endpoint did respond (manual review recommended)
-    if result["responded"] and not any(
-        lbl in ("OpenIKEv2",) for lbl in found_vendor_labels
-    ):
-        weak_reasons.append("vendor-unknown")
-
+    # Do NOT treat unknown vendor IDs as weak crypto (avoids HIGH false positives).
     result["weak_crypto"]  = 1 if weak_reasons else 0
     result["weak_reasons"] = ", ".join(weak_reasons)
     return result

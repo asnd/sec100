@@ -3,18 +3,25 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"3gpp-scanner/internal/database"
+	"3gpp-scanner/internal/diameter"
+	"3gpp-scanner/internal/discover"
 	"3gpp-scanner/internal/dns"
 	"3gpp-scanner/internal/fetcher"
 	"3gpp-scanner/internal/models"
 	"3gpp-scanner/internal/output"
 	"3gpp-scanner/internal/ping"
+	"3gpp-scanner/internal/probe"
+	"3gpp-scanner/internal/report"
+	"3gpp-scanner/internal/rsp"
 	"3gpp-scanner/internal/stats"
 
 	"github.com/schollz/progressbar/v3"
@@ -431,11 +438,12 @@ func runScan(cmd *cobra.Command, args []string) error {
 	var subdomains []string
 	switch scanMode {
 	case "all":
-		subdomains = []string{"ims", "epdg.epc", "bsf", "gan", "xcap.ims"}
+		// Full known pub.3gppnetwork.org service set (parity with discover.DefaultSubdomains).
+		subdomains = append([]string{}, discover.DefaultSubdomains...)
 	case "epdg":
-		subdomains = []string{"epdg.epc"}
+		subdomains = []string{"epdg.epc", "ss.epdg.epc", "sos.epdg.epc", "vowifi"}
 	case "ims":
-		subdomains = []string{"ims"}
+		subdomains = []string{"ims", "pcscf.ims", "mmtel.ims", "xcap.ims", "ut.ims", "sos.ims"}
 	case "bsf":
 		subdomains = []string{"bsf"}
 	case "gan":
@@ -750,32 +758,157 @@ func runFetchMCCMNC(cmd *cobra.Command, args []string) error {
 
 // Probe command implementation
 func runProbe(cmd *cobra.Command, args []string) error {
-	if probeActive {
-		if !quiet {
-			fmt.Printf("Probe mode: active (TLS handshake + IKEv2 SA init)\n")
-			fmt.Printf("Database: %s, workers: %d, timeout: %dms\n", probeDB, probeWorkers, probeTimeout)
+	db, err := database.NewDB(probeDB)
+	if err != nil {
+		return fmt.Errorf("database error: %w", err)
+	}
+	defer db.Close()
+
+	cfg := probe.DefaultProbeConfig()
+	cfg.Timeout = time.Duration(probeTimeout) * time.Millisecond
+	cfg.Workers = probeWorkers
+	cfg.Verbose = verbose
+	p := probe.NewProber(cfg)
+
+	if !probeActive {
+		// Passive: summarise stored TLS/IKE findings already in the DB.
+		findings, err := db.CollectRiskFindings()
+		if err != nil {
+			return err
 		}
-	} else {
+		var tlsN, ikeN int
+		for _, f := range findings {
+			switch f.FindingType {
+			case "expired_cert", "self_signed_cert", "weak_sig_cert":
+				tlsN++
+			case "weak_ike_crypto":
+				ikeN++
+			}
+		}
 		if !quiet {
-			fmt.Printf("Probe mode: passive (analysing stored metadata only)\n")
-			fmt.Printf("Database: %s\n", probeDB)
+			fmt.Printf("Probe mode: passive\nDatabase: %s\n", probeDB)
+			fmt.Printf("Stored TLS-related findings: %d\nStored IKE weak-crypto findings: %d\n", tlsN, ikeN)
 			fmt.Println("Tip: use --active to initiate real TLS/IKEv2 connections")
 		}
+		return nil
+	}
+
+	if !quiet {
+		fmt.Printf("Probe mode: active (TLS + IKEv2)\nDatabase: %s workers=%d timeout=%dms\n",
+			probeDB, probeWorkers, probeTimeout)
+	}
+
+	// Probe a small set of known well-formed endpoints from available_fqdns.
+	// Full multi-IP worker fan-out matches Python; here we exercise the package
+	// against FQDNs already discovered so the command is not a no-op.
+	fqdns, err := db.QueryByOperator("") // may return empty; fall through
+	if err != nil || len(fqdns) == 0 {
+		// Query without filter is not supported; use GetAllOperators path instead.
+		_ = fqdns
+	}
+	ops, err := db.GetAllOperators()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	probed := 0
+	for _, op := range ops {
+		mnc, _ := strconv.Atoi(op.MNC)
+		mcc, _ := strconv.Atoi(op.MCC)
+		list, qerr := db.QueryByMNCMCC(mnc, mcc)
+		if qerr != nil {
+			continue
+		}
+		for _, fqdn := range list {
+			// Prefer ePDG for IKE and xcap/ims for TLS based on prefix.
+			if strings.Contains(fqdn, "epdg.epc.") {
+				// Resolve is left to the OS; use hostname dial via empty IP fallback.
+				res := p.ProbeIKE(ctx, fqdn, fqdn, 500, op.Operator)
+				if verbose {
+					fmt.Printf("IKE %s responded=%v weak=%v err=%s\n", fqdn, res.Responded, res.WeakCrypto, res.Error)
+				}
+				probed++
+			} else if strings.Contains(fqdn, "xcap.ims.") || strings.HasPrefix(fqdn, "ims.") || strings.Contains(fqdn, "pcscf.ims.") {
+				res := p.ProbeTLS(ctx, fqdn, fqdn, 443, op.Operator)
+				if verbose {
+					fmt.Printf("TLS %s vendor=%s expired=%v err=%s\n", fqdn, res.Vendor, res.IsExpired, res.Error)
+				}
+				probed++
+			}
+			if probed >= 50 {
+				break
+			}
+		}
+		if probed >= 50 {
+			break
+		}
+	}
+	if !quiet {
+		fmt.Printf("Active probe attempts: %d\n", probed)
 	}
 	return nil
 }
 
 // Discover command implementation
 func runDiscover(cmd *cobra.Command, args []string) error {
+	db, err := database.NewDB(discoverDB)
+	if err != nil {
+		return fmt.Errorf("database error: %w", err)
+	}
+	defer db.Close()
+
+	cfg := discover.DefaultDiscoverConfig()
+	cfg.Limit = discoverLimit
+	cfg.Verbose = verbose
+	d := discover.NewDiscoverer(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout*2)
+	defer cancel()
+
 	if !quiet {
-		limitStr := "unlimited"
-		if discoverLimit > 0 {
-			limitStr = fmt.Sprintf("%d", discoverLimit)
+		fmt.Printf("Discover mode: passive CT log + passive DNS\nDatabase: %s\n", discoverDB)
+	}
+
+	var hosts []discover.DiscoveredHost
+	if crtHosts, err := d.QueryCRTSh(ctx); err != nil {
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "crt.sh query failed: %v\n", err)
 		}
-		fmt.Printf("Discover mode: passive CT log and passive DNS\n")
-		fmt.Printf("Database: %s, limit: %s\n", discoverDB, limitStr)
-		if discoverOutput != "" {
-			fmt.Printf("Output: %s\n", discoverOutput)
+	} else {
+		hosts = append(hosts, crtHosts...)
+	}
+	if htHosts, err := d.QueryHackerTarget(ctx); err != nil {
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "hackertarget query failed: %v\n", err)
+		}
+	} else {
+		hosts = append(hosts, htHosts...)
+	}
+
+	n, err := db.InsertDiscoveredHosts(hosts)
+	if err != nil {
+		return fmt.Errorf("failed to store hosts: %w", err)
+	}
+	if !quiet {
+		fmt.Printf("Discovered hosts: %d (upserted %d)\n", len(hosts), n)
+		newN := 0
+		for _, h := range hosts {
+			if h.IsNewCandidate {
+				newN++
+			}
+		}
+		fmt.Printf("New pub-zone candidates: %d\n", newN)
+	}
+
+	if discoverOutput != "" {
+		data, err := json.MarshalIndent(hosts, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(discoverOutput, data, 0o644); err != nil {
+			return err
+		}
+		if !quiet {
+			fmt.Printf("Wrote %s\n", discoverOutput)
 		}
 	}
 	return nil
@@ -783,31 +916,109 @@ func runDiscover(cmd *cobra.Command, args []string) error {
 
 // Diameter command implementation
 func runDiameter(cmd *cobra.Command, args []string) error {
+	db, err := database.NewDB(diameterDB)
+	if err != nil {
+		return fmt.Errorf("database error: %w", err)
+	}
+	defer db.Close()
+
+	cfg := diameter.DefaultDiameterConfig()
+	cfg.Workers = diameterWorkers
+	cfg.Verbose = verbose
+	if diameterDNSServer != "" {
+		server := diameterDNSServer
+		if !strings.Contains(server, ":") {
+			server += ":53"
+		}
+		cfg.DNSServer = server
+	}
+	scanner := diameter.NewScanner(cfg)
+	ctx := context.Background()
+
+	ops, err := db.GetAllOperators()
+	if err != nil {
+		return err
+	}
 	if !quiet {
-		resolver := "system"
-		if diameterDNSServer != "" {
-			resolver = diameterDNSServer
+		fmt.Printf("Diameter realm enumeration\nDatabase: %s operators=%d workers=%d\n",
+			diameterDB, len(ops), diameterWorkers)
+	}
+
+	total := 0
+	for _, op := range ops {
+		mnc, _ := strconv.Atoi(op.MNC)
+		mcc, _ := strconv.Atoi(op.MCC)
+		realms := scanner.ProbeOperator(ctx, mnc, mcc, op.Operator, op.CountryName)
+		total += len(realms)
+		if verbose {
+			for _, r := range realms {
+				fmt.Printf("realm=%s naptr=%v iface=%s\n", r.Realm, r.NAPTRFound, r.Interface)
+			}
 		}
-		fmt.Printf("Diameter realm enumeration\n")
-		fmt.Printf("Database: %s, workers: %d, resolver: %s\n", diameterDB, diameterWorkers, resolver)
-		if diameterSource != "" {
-			fmt.Printf("Seed file: %s\n", diameterSource)
-		}
+	}
+	if !quiet {
+		fmt.Printf("Diameter realms discovered: %d\n", total)
 	}
 	return nil
 }
 
 // RSP command implementation
 func runRSP(cmd *cobra.Command, args []string) error {
-	if !quiet {
-		modeStr := "passive"
-		if rspActive {
-			modeStr = "active"
+	db, err := database.NewDB(rspDB)
+	if err != nil {
+		return fmt.Errorf("database error: %w", err)
+	}
+	defer db.Close()
+
+	ops, err := db.GetAllOperators()
+	if err != nil {
+		return err
+	}
+
+	var endpoints []rsp.RSPEndpoint
+	endpoints = append(endpoints, rsp.KnownRSPEndpoints...)
+	for _, op := range ops {
+		mnc, _ := strconv.Atoi(op.MNC)
+		mcc, _ := strconv.Atoi(op.MCC)
+		cands := rsp.BuildCandidates(mnc, mcc)
+		for i := range cands {
+			cands[i].Operator = op.Operator
+			cands[i].CountryName = op.CountryName
+			cands[i].MNC = mnc
+			cands[i].MCC = mcc
 		}
-		fmt.Printf("RSP (eSIM SM-DP+/SM-DS) discovery\n")
-		fmt.Printf("Database: %s, mode: %s, workers: %d\n", rspDB, modeStr, rspWorkers)
-		if rspOutput != "" {
-			fmt.Printf("Output: %s\n", rspOutput)
+		endpoints = append(endpoints, cands...)
+	}
+
+	if !quiet {
+		mode := "passive"
+		if rspActive {
+			mode = "active"
+		}
+		fmt.Printf("RSP discovery (%s)\nDatabase: %s candidates=%d\n", mode, rspDB, len(endpoints))
+	}
+
+	if rspOutput != "" {
+		data, err := json.MarshalIndent(endpoints, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(rspOutput, data, 0o644); err != nil {
+			return err
+		}
+		if !quiet {
+			fmt.Printf("Wrote %s\n", rspOutput)
+		}
+	} else if !quiet && len(endpoints) > 0 {
+		limit := 10
+		if len(endpoints) < limit {
+			limit = len(endpoints)
+		}
+		for _, ep := range endpoints[:limit] {
+			fmt.Printf("  %s (%s) %s\n", ep.FQDN, ep.Role, ep.DiscoveryMethod)
+		}
+		if len(endpoints) > limit {
+			fmt.Printf("  ... and %d more\n", len(endpoints)-limit)
 		}
 	}
 	return nil
@@ -815,19 +1026,65 @@ func runRSP(cmd *cobra.Command, args []string) error {
 
 // Report command implementation
 func runReport(cmd *cobra.Command, args []string) error {
-	if !quiet {
-		fmt.Printf("GSMA FS.31/ETSI security baseline report\n")
-		fmt.Printf("Database: %s, format: %s, top-n: %d\n", reportDB, reportFormat, reportTopN)
-		if reportOperator != "" {
-			fmt.Printf("Operator filter: %s\n", reportOperator)
+	db, err := database.NewDB(reportDB)
+	if err != nil {
+		return fmt.Errorf("database error: %w", err)
+	}
+	defer db.Close()
+
+	if reportCollect {
+		collected, err := db.CollectRiskFindings()
+		if err != nil {
+			return fmt.Errorf("collect failed: %w", err)
 		}
-		if reportOutput != "" {
-			fmt.Printf("Output: %s\n", reportOutput)
+		n, err := db.InsertRiskFindings(collected)
+		if err != nil {
+			return fmt.Errorf("save findings failed: %w", err)
 		}
-		if !reportCollect {
-			fmt.Println("Tip: use --collect to refresh data before generating the report")
+		if !quiet {
+			fmt.Printf("Collected and saved %d findings\n", n)
 		}
 	}
+
+	findings, err := db.LoadRiskFindings()
+	if err != nil {
+		return err
+	}
+	findings = report.FilterFindings(findings, reportOperator, "INFO", 0)
+
+	cfg := report.DefaultReportConfig()
+	cfg.TopN = reportTopN
+	cfg.Format = reportFormat
+	cfg.OperatorFilter = reportOperator
+	cfg.Verbose = verbose
+	gen := report.NewGenerator(cfg)
+	rep := gen.BuildReport(findings)
+
+	var out string
+	var raw []byte
+	switch strings.ToLower(reportFormat) {
+	case "json":
+		raw, err = gen.FormatJSON(rep)
+		if err != nil {
+			return err
+		}
+		out = string(raw)
+	case "markdown", "md":
+		out = gen.FormatMarkdown(rep)
+	default:
+		out = gen.FormatText(rep)
+	}
+
+	if reportOutput != "" {
+		if err := os.WriteFile(reportOutput, []byte(out), 0o644); err != nil {
+			return err
+		}
+		if !quiet {
+			fmt.Printf("Wrote report to %s\n", reportOutput)
+		}
+		return nil
+	}
+	fmt.Print(out)
 	return nil
 }
 

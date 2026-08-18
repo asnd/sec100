@@ -134,10 +134,24 @@ def init_db(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
 def enrich_from_db(conn: sqlite3.Connection, mnc: int, mcc: int) -> tuple[str | None, str | None]:
     """Return (operator, country_name) from the operators table for the given MNC/MCC."""
+    if not _table_exists(conn, "operators"):
+        return None, None
+
+    # country_name may be absent on older schemas — select what exists.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(operators)").fetchall()}
+    country_expr = "country_name" if "country_name" in cols else "NULL AS country_name"
     row = conn.execute(
-        "SELECT operator, country_name FROM operators WHERE mnc = ? AND mcc = ? LIMIT 1",
+        f"SELECT operator, {country_expr} FROM operators WHERE mnc = ? AND mcc = ? LIMIT 1",
         (mnc, mcc),
     ).fetchone()
     if row:

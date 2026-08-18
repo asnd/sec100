@@ -92,16 +92,28 @@ func TestFilterFindings(t *testing.T) {
 		t.Errorf("severity filter HIGH+: got %d findings, want 2", len(filtered))
 	}
 
-	// topN limit.
+	// topN limit keeps the highest-severity findings first.
 	filtered = FilterFindings(findings, "", "INFO", 3)
 	if len(filtered) != 3 {
 		t.Errorf("topN limit: got %d findings, want 3", len(filtered))
 	}
+	if filtered[0].Severity != "CRITICAL" {
+		t.Errorf("topN[0] severity = %q, want CRITICAL", filtered[0].Severity)
+	}
+	if filtered[1].Severity != "HIGH" {
+		t.Errorf("topN[1] severity = %q, want HIGH", filtered[1].Severity)
+	}
 
-	// No filter — all 5 findings returned.
+	// No filter — all 5 findings returned, severity-sorted.
 	filtered = FilterFindings(findings, "", "INFO", 0)
 	if len(filtered) != 5 {
 		t.Errorf("no filter: got %d findings, want 5", len(filtered))
+	}
+	for i := 1; i < len(filtered); i++ {
+		if SeverityWeight(filtered[i-1].Severity) < SeverityWeight(filtered[i].Severity) {
+			t.Errorf("findings not sorted by severity: %v before %v",
+				filtered[i-1].Severity, filtered[i].Severity)
+		}
 	}
 }
 

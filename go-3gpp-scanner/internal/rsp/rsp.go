@@ -79,8 +79,9 @@ func BuildCandidates(mnc, mcc int) []RSPEndpoint {
 			Role:            "SM-DP+",
 			DiscoveryMethod: "dns_pub",
 		},
+		// '+' is not a valid DNS label character; use a hyphenated form.
 		{
-			FQDN:            "smdp+." + base,
+			FQDN:            "smdp-plus." + base,
 			Role:            "SM-DP+",
 			DiscoveryMethod: "dns_pub",
 		},

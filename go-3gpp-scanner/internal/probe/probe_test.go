@@ -259,3 +259,52 @@ func TestExtractVendorIDs(t *testing.T) {
 		}
 	})
 }
+
+func TestMatchIKEVendorID(t *testing.T) {
+	if got := MatchIKEVendorID("4048b7d56ebce88525e7de7f00d6c2d3"); got != "OpenIKEv2" {
+		t.Errorf("OpenIKEv2 match = %q", got)
+	}
+	if got := MatchIKEVendorID("deadbeef"); got != "" {
+		t.Errorf("unknown vendor should be empty, got %q", got)
+	}
+}
+
+func TestAssessIKEWeakCrypto(t *testing.T) {
+	// Minimal IKEv2 header + SA payload with DES transform marker.
+	resp := make([]byte, 40)
+	resp[16] = 33 // next = SA
+	resp[17] = 0x20
+	resp[28] = 0 // next after SA
+	resp[29] = 0
+	binary.BigEndian.PutUint16(resp[30:32], 12) // payload len
+	// body starts at 32: plant ENCR type + DES id
+	resp[32] = 0x01
+	resp[33] = 0x02 // DES
+
+	weak, reasons := assessIKEWeakCrypto(resp, nil)
+	if !weak {
+		t.Fatalf("expected weak crypto, reasons=%v", reasons)
+	}
+	if len(reasons) == 0 || reasons[0] != "weak-encr-transform" {
+		t.Errorf("reasons = %v", reasons)
+	}
+
+	// No SA payload → not weak solely due to unknown vendor
+	clean := make([]byte, 28)
+	clean[16] = 0
+	clean[17] = 0x20
+	weak, reasons = assessIKEWeakCrypto(clean, []string{"unknown-box"})
+	if weak {
+		t.Errorf("unknown vendor alone must not be weak crypto, reasons=%v", reasons)
+	}
+}
+
+func TestLabelVendorIDs(t *testing.T) {
+	got := labelVendorIDs([]string{"4048b7d56ebce885aabb", "abcdef"})
+	if len(got) != 2 {
+		t.Fatalf("got %v", got)
+	}
+	if got[0] != "OpenIKEv2" {
+		t.Errorf("first label = %q", got[0])
+	}
+}

@@ -65,9 +65,13 @@ var ControlMap = map[string][3]string{
 	"missing_epdg":     {"3GPP TS 24.302", "MEDIUM", "No VoWiFi Published"},
 	"diameter_public":  {"GSMA IR.88 4.2", "HIGH", "Diameter Realm on Public DNS"},
 	"rsp_smdp_exposed": {"GSMA SGP.22 4.1", "INFO", "SM-DP+ Discovered"},
+	"rsp_smds_exposed": {"GSMA SGP.22 4.1", "INFO", "SM-DS Discovered"},
 	"self_signed_cert": {"GSMA FS.31 4.3", "HIGH", "Self-Signed Certificate"},
 	"weak_sig_cert":    {"GSMA NESAS/TS 33.310", "HIGH", "SHA-1/MD5 Cert"},
 	"missing_ims":      {"3GPP TS 24.229", "MEDIUM", "No IMS Published"},
+	"missing_sos":      {"3GPP TS 23.167", "MEDIUM", "No Emergency SOS Published"},
+	"missing_bsf":      {"3GPP TS 33.220", "LOW", "No BSF Auth Published"},
+	"ct_new_prefix":    {"Informational", "INFO", "New 3GPP Prefix via CT Logs"},
 }
 
 // SeverityOrder defines the display ordering from highest to lowest severity.
@@ -288,8 +292,10 @@ func (g *Generator) FormatJSON(r Report) ([]byte, error) {
 	return json.MarshalIndent(r, "", "  ")
 }
 
-// FilterFindings filters a slice of RiskFinding by operator substring,
-// minimum severity weight, and a topN limit.
+// FilterFindings filters a slice of RiskFinding by operator substring and
+// minimum severity weight. Results are sorted by severity (highest first),
+// then operator name, before applying an optional topN limit so the most
+// severe findings are retained.
 func FilterFindings(findings []RiskFinding, operatorFilter, severityMin string, topN int) []RiskFinding {
 	minWeight := SeverityWeight(severityMin)
 
@@ -304,6 +310,14 @@ func FilterFindings(findings []RiskFinding, operatorFilter, severityMin string, 
 		}
 		filtered = append(filtered, f)
 	}
+
+	sort.SliceStable(filtered, func(i, j int) bool {
+		wi, wj := SeverityWeight(filtered[i].Severity), SeverityWeight(filtered[j].Severity)
+		if wi != wj {
+			return wi > wj
+		}
+		return filtered[i].Operator < filtered[j].Operator
+	})
 
 	if topN > 0 && topN < len(filtered) {
 		filtered = filtered[:topN]
