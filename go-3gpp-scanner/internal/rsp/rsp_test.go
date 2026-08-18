@@ -26,13 +26,10 @@ func TestBuildCandidates(t *testing.T) {
 		"lpa." + expectedBase,
 	}
 
-	for _, fqdn := range expectedFQDNs {
-		if strings.Contains(fqdn, "smdp+.") {
-			t.Errorf("invalid DNS label with '+': %s", fqdn)
-		}
-	}
-
 	for i, c := range candidates {
+		if strings.Contains(c.FQDN, "smdp+.") || strings.Contains(c.FQDN, "+") {
+			t.Errorf("invalid DNS label with '+': %s", c.FQDN)
+		}
 		if c.FQDN != expectedFQDNs[i] {
 			t.Errorf("candidate[%d] FQDN: got %q, want %q", i, c.FQDN, expectedFQDNs[i])
 		}

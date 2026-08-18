@@ -75,6 +75,13 @@ def test_rsp_fingerprint_vendor(rsp_mod):
     assert rsp_mod.fingerprint_vendor("IDEMIA CA", "") == "IDEMIA"
 
 
+def test_decode_peer_cert_empty():
+    from tls_cert_util import decode_peer_cert
+
+    assert decode_peer_cert(b"") == {}
+    assert decode_peer_cert(b"not-a-cert") == {}
+
+
 def test_ike_packet_layout(tls_mod):
     pkt = tls_mod._build_ike_sa_init()
     assert len(pkt) == 52

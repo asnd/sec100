@@ -220,21 +220,9 @@ def fetch_tls_cert(hostname: str, port: int = 443, timeout: int = 8) -> dict:
                 raw = ssock.getpeercert() or {}
                 cert_bin = ssock.getpeercert(binary_form=True)
                 if not raw and cert_bin:
-                    # Hyphenated script names are not importable modules; decode DER
-                    # locally. Uses CPython PEM round-trip (stdlib-only; no cryptography).
-                    import os
-                    import tempfile
-                    pem = ssl.DER_cert_to_PEM_cert(cert_bin)
-                    fd, path = tempfile.mkstemp(suffix=".pem")
-                    try:
-                        with os.fdopen(fd, "w", encoding="ascii") as fh:
-                            fh.write(pem)
-                        raw = ssl._ssl._test_decode_cert(path)  # type: ignore[attr-defined]
-                    finally:
-                        try:
-                            os.unlink(path)
-                        except OSError:
-                            pass
+                    from tls_cert_util import decode_peer_cert as _decode_peer_cert
+
+                    raw = _decode_peer_cert(cert_bin)
                 if not raw:
                     return {}
                 # Subject

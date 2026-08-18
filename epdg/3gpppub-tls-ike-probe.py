@@ -162,34 +162,11 @@ def fingerprint_tls_vendor(issuer_cn: str, issuer_o: str, sans: list[str]) -> st
 # ── TLS probe ─────────────────────────────────────────────────────────────────
 
 def decode_peer_cert(cert_bin: bytes) -> dict:
-    """
-    Decode a DER-encoded peer certificate into the dict form used by
-    SSLSocket.getpeercert().
+    """Decode DER peer cert; see tls_cert_util.decode_peer_cert."""
+    # Local import keeps the CLI script runnable without package install tricks.
+    from tls_cert_util import decode_peer_cert as _decode
 
-    With ssl.CERT_NONE, getpeercert() returns {} even when a cert was
-    presented. binary_form=True still returns DER bytes, which we decode
-    via the stdlib helper (no third-party crypto dependency).
-    """
-    if not cert_bin:
-        return {}
-    import os
-    import tempfile
-
-    pem = ssl.DER_cert_to_PEM_cert(cert_bin)
-    fd, path = tempfile.mkstemp(suffix=".pem")
-    try:
-        with os.fdopen(fd, "w", encoding="ascii") as fh:
-            fh.write(pem)
-        # Private but stable helper used across CPython versions.
-        return ssl._ssl._test_decode_cert(path)  # type: ignore[attr-defined]
-    except Exception as exc:
-        log.debug("Failed to decode peer certificate DER: %s", exc)
-        return {}
-    finally:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+    return _decode(cert_bin)
 
 
 def probe_tls(fqdn: str, ip: str, port: int, timeout: float) -> Optional[Dict]:
