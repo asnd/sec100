@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r epdg/requirements.txt
+      - run: python -m py_compile epdg/*.py
+      - run: python -m unittest discover -s tests -p 'test_*.py'
+      - run: |
+          python epdg/3gpppub-5g-discovery.py --help
+          python epdg/3gpppub-dns-checker.py --help
+          python epdg/3gpppub-diff.py --help
+
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-3gpp-scanner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+      - run: go test ./...
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --tag 3gpp-explorer:test .

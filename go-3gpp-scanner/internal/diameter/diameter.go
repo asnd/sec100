@@ -167,13 +167,13 @@ func (s *Scanner) probeRealm(ctx context.Context, realm string, mnc, mcc int, op
 		}
 
 		// Collect service strings for interface mapping.
-		for _, token := range strings.Fields(naptr.Services) {
+		for _, token := range strings.Fields(naptr.Service) {
 			serviceTokens = append(serviceTokens, strings.ToLower(token))
 		}
 
 		// Each NAPTR replacement is a potential Diameter peer host.
 		if naptr.Replacement != "" && naptr.Replacement != "." {
-			peer := s.resolvePeer(ctx, naptr.Replacement, naptr.Services, server)
+			peer := s.resolvePeer(ctx, naptr.Replacement, naptr.Service, server)
 			peers = append(peers, peer)
 		}
 	}

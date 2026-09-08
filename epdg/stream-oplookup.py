@@ -393,12 +393,12 @@ with tab_asn:
     )
 
     conn_asn = get_conn()
-    has_asn = "asn" in {
-        row[1] for row in conn_asn.execute("PRAGMA table_info(available_fqdns)")
-    }
+    has_asn = conn_asn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ip_enrichment'"
+    ).fetchone()
 
     if not has_asn or not conn_asn.execute(
-        "SELECT 1 FROM available_fqdns WHERE asn IS NOT NULL LIMIT 1"
+        "SELECT 1 FROM ip_enrichment WHERE asn IS NOT NULL LIMIT 1"
     ).fetchone():
         st.info(
             "No ASN data found. Run `python3 3gpppub-asn-enricher.py` "
@@ -407,11 +407,12 @@ with tab_asn:
     else:
         asn_df = pd.read_sql_query(
             f"""
-            SELECT operator, country_name, fqdn, record_type, resolved_ips,
-                   asn, asn_org, hosting_provider, ip_country,
-                   COALESCE(service, ({sql_case_when('fqdn')})) AS service
-            FROM available_fqdns
-            WHERE asn IS NOT NULL
+            SELECT f.operator, f.country_name, f.fqdn, f.record_type, e.ip AS resolved_ips,
+                   e.asn, e.asn_org, e.hosting_provider, e.ip_country,
+                   COALESCE(f.service, ({sql_case_when('f.fqdn')})) AS service
+            FROM available_fqdns f
+            JOIN ip_enrichment e ON e.fqdn = f.fqdn AND e.record_type = f.record_type
+            WHERE f.dns_status = 'ANSWERED' AND e.asn IS NOT NULL
             """,
             conn_asn,
         )

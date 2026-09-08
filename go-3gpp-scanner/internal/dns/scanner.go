@@ -155,7 +155,12 @@ func (s *Scanner) resolveFQDN(entry models.MCCMNCEntry, subdomain string) *model
 		country = "Unknown"
 	}
 
-	fqdn := fmt.Sprintf("%s.mnc%03d.mcc%03d.%s", subdomain, mnc, mcc, s.config.ParentDomain)
+	var fqdn string
+	if subdomain == "" {
+		fqdn = fmt.Sprintf("mnc%03d.mcc%03d.%s", mnc, mcc, s.config.ParentDomain)
+	} else {
+		fqdn = fmt.Sprintf("%s.mnc%03d.mcc%03d.%s", subdomain, mnc, mcc, s.config.ParentDomain)
+	}
 
 	resolution := s.resolveA(fqdn)
 	if resolution == nil {
@@ -255,6 +260,9 @@ func classifyIPs(ips []string) string {
 
 // BuildFQDN constructs a 3GPP FQDN from components
 func BuildFQDN(subdomain string, mnc, mcc int, parentDomain string) string {
+	if subdomain == "" {
+		return fmt.Sprintf("mnc%03d.mcc%03d.%s", mnc, mcc, parentDomain)
+	}
 	return fmt.Sprintf("%s.mnc%03d.mcc%03d.%s", subdomain, mnc, mcc, parentDomain)
 }
 

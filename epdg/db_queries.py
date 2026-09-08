@@ -48,6 +48,7 @@ def query_fqdns(
                f.first_seen, f.last_seen,
                COALESCE(f.service, ({sql_case_when('f.fqdn')})) AS service
         FROM available_fqdns f
+        WHERE f.dns_status = 'ANSWERED'
         ORDER BY f.country_name, f.operator
         """,
         conn,

@@ -145,6 +145,17 @@ def query_srv(name: str) -> list[dict]:
         return []
 
 
+def naptr_srv_names(records: list[dict]) -> list[str]:
+    """Return exact SRV owner names selected by terminal S-NAPTR records."""
+    return sorted({
+        record["replacement"]
+        for record in records
+        if "s" in record["flags"].lower()
+        and record["replacement"]
+        and record["replacement"] != "."
+    })
+
+
 def probe_operator_naptr(row: dict) -> dict:
     fqdn        = row["fqdn"]
     operator    = row["operator"]
@@ -167,17 +178,13 @@ def probe_operator_naptr(row: dict) -> dict:
             srvs.extend(entries)
             log.info("  [SRV] %s → %d records", srv_name, len(entries))
 
-    # Also follow NAPTR replacements with SRV if replacement domain looks like a SRV target
-    for naptr in natptrs:
-        rep = naptr["replacement"]
-        if rep and rep != ".":
-            for tmpl in IMS_SRV_TEMPLATES:
-                srv_name = tmpl.format(fqdn=rep)
-                entries  = query_srv(srv_name)
-                if entries:
-                    for e in entries:
-                        e["query_name"] = srv_name
-                    srvs.extend(entries)
+    # An S-NAPTR replacement is already the SRV owner name (RFC 3263).
+    for srv_name in naptr_srv_names(natptrs):
+        entries = query_srv(srv_name)
+        if entries:
+            for entry in entries:
+                entry["query_name"] = srv_name
+            srvs.extend(entries)
 
     if natptrs:
         log.info("  [NAPTR] %s → %d records | %s (%s)",

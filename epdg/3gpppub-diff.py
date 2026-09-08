@@ -88,7 +88,7 @@ def service_from_fqdn(fqdn: str) -> str:
 def take_snapshot(conn: sqlite3.Connection, label: str | None = None) -> int:
     rows = conn.execute(
         """
-        SELECT fqdn, record_type, resolved_ips, operator, country_name, mnc, mcc
+        SELECT fqdn, record_type, resolved_ips, dns_status, operator, country_name, mnc, mcc
         FROM available_fqdns
         ORDER BY fqdn, record_type
         """
@@ -138,11 +138,19 @@ def diff_snapshots(
         "new_country": [],
     }
 
-    from_countries = {from_idx[k]["country_name"] for k in from_keys}
-    to_countries   = {to_idx[k]["country_name"]   for k in to_keys}
+    def answered(row: dict) -> bool:
+        return row.get("dns_status", "ANSWERED") == "ANSWERED"
+
+    def confirmed_absent(row: dict) -> bool:
+        return row.get("dns_status") in {"NXDOMAIN", "NODATA"}
+
+    from_answered = {key for key, row in from_idx.items() if answered(row)}
+    to_answered = {key for key, row in to_idx.items() if answered(row)}
+    from_countries = {from_idx[k]["country_name"] for k in from_answered}
+    to_countries   = {to_idx[k]["country_name"] for k in to_answered}
 
     # Added
-    for key in sorted(to_keys - from_keys):
+    for key in sorted(to_answered - from_answered):
         row = to_idx[key]
         events["added"].append({
             "country_name": row["country_name"],
@@ -154,7 +162,10 @@ def diff_snapshots(
         })
 
     # Removed
-    for key in sorted(from_keys - to_keys):
+    for key in sorted(from_answered):
+        current = to_idx.get(key)
+        if current is None or not confirmed_absent(current):
+            continue
         row = from_idx[key]
         events["removed"].append({
             "country_name": row["country_name"],
@@ -166,7 +177,7 @@ def diff_snapshots(
         })
 
     # IP changes
-    for key in from_keys & to_keys:
+    for key in from_answered & to_answered:
         old_ips = set((from_idx[key]["resolved_ips"] or "").split(","))
         new_ips = set((to_idx[key]["resolved_ips"]   or "").split(","))
         if old_ips != new_ips:

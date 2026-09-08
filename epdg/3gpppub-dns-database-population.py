@@ -87,16 +87,33 @@ CREATE TABLE IF NOT EXISTS available_fqdns (
     record_type  TEXT    NOT NULL DEFAULT 'A',
     service      TEXT,
     dns_status   TEXT,
+    last_query_status TEXT,
     ip_class     TEXT,
     resolved_ips TEXT,
     first_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(fqdn, record_type)
+);
+
+CREATE TABLE IF NOT EXISTS ip_enrichment (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    fqdn             TEXT NOT NULL,
+    record_type      TEXT NOT NULL,
+    ip               TEXT NOT NULL,
+    asn              TEXT,
+    asn_org          TEXT,
+    hosting_provider TEXT,
+    ip_country       TEXT,
+    bgp_prefix       TEXT,
+    enriched_at      TIMESTAMP NOT NULL,
+    UNIQUE(fqdn, record_type, ip)
 );
 
 CREATE INDEX IF NOT EXISTS idx_fqdns_mcc     ON available_fqdns(mcc);
 CREATE INDEX IF NOT EXISTS idx_fqdns_country ON available_fqdns(country_name);
 CREATE INDEX IF NOT EXISTS idx_ops_country   ON operators(country_name);
+CREATE INDEX IF NOT EXISTS idx_enrichment_ip ON ip_enrichment(ip);
 """
 
 
@@ -104,25 +121,22 @@ def init_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    # Migrate existing DBs that pre-date the service column
-    try:
-        conn.execute("ALTER TABLE available_fqdns ADD COLUMN service TEXT")
-        conn.commit()
-        log.info("Migrated available_fqdns: added service column")
-    except sqlite3.OperationalError:
-        pass  # Column already present
-    try:
-        conn.execute("ALTER TABLE available_fqdns ADD COLUMN dns_status TEXT")
-        conn.commit()
-        log.info("Migrated available_fqdns: added dns_status column")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE available_fqdns ADD COLUMN ip_class TEXT")
-        conn.commit()
-        log.info("Migrated available_fqdns: added ip_class column")
-    except sqlite3.OperationalError:
-        pass
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(available_fqdns)")}
+    for column, column_type in {
+        "service": "TEXT", "dns_status": "TEXT", "last_query_status": "TEXT", "ip_class": "TEXT",
+        "last_checked": "TIMESTAMP",
+    }.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE available_fqdns ADD COLUMN {column} {column_type}")
+            log.info("Migrated available_fqdns: added %s column", column)
+    conn.execute(
+        "UPDATE available_fqdns SET dns_status = 'ANSWERED' "
+        "WHERE dns_status IS NULL AND resolved_ips IS NOT NULL AND resolved_ips != ''"
+    )
+    conn.execute(
+        "UPDATE available_fqdns SET last_query_status = dns_status "
+        "WHERE last_query_status IS NULL AND dns_status IS NOT NULL"
+    )
     conn.commit()
     return conn
 
@@ -182,26 +196,26 @@ def check_operator(item: dict, subdomains: list[str], record_types: list[str]) -
     country_name = item.get("countryName") or "Unknown"
     country_code = item.get("countryCode") or ""
 
-    found = []
+    records = []
     for subdomain in subdomains:
         fqdn = f"{subdomain}.mnc{mnc:03d}.mcc{mcc:03d}.{PARENT_DOMAIN}"
         for rtype in record_types:
             dns_status, ip_class, ips = resolve_fqdn(fqdn, rtype)
+            records.append({
+                "fqdn":         fqdn,
+                "record_type":  rtype,
+                "dns_status":   dns_status,
+                "ip_class":     ip_class,
+                "resolved_ips": ",".join(ips),
+            })
             if dns_status == "ANSWERED" and ips:
-                found.append({
-                    "fqdn":         fqdn,
-                    "record_type":  rtype,
-                    "dns_status":   dns_status,
-                    "ip_class":     ip_class,
-                    "resolved_ips": ",".join(ips),
-                })
                 log.info("  [+] %s %s [%s] -> %s", rtype, fqdn, ip_class, ", ".join(ips))
 
     return {
         "mnc": mnc, "mcc": mcc,
         "operator": operator, "country_name": country_name,
         "country_code": country_code,
-        "found": found,
+        "records": records,
     }
 
 
@@ -214,7 +228,7 @@ def save_result(conn: sqlite3.Connection, result: dict) -> None:
             """
             INSERT INTO operators (mnc, mcc, operator, country_name, country_code, last_scanned)
             VALUES (:mnc, :mcc, :operator, :country_name, :country_code, :now)
-            ON CONFLICT(mnc, mcc) DO UPDATE SET
+            ON CONFLICT DO UPDATE SET
                 operator     = excluded.operator,
                 country_name = excluded.country_name,
                 country_code = excluded.country_code,
@@ -222,19 +236,23 @@ def save_result(conn: sqlite3.Connection, result: dict) -> None:
             """,
             {**result, "now": now},
         )
-        for fqdn_entry in result.get("found", []):
+        for fqdn_entry in result.get("records", []):
             conn.execute(
                 """
                 INSERT INTO available_fqdns
-                    (mnc, mcc, operator, country_name, fqdn, record_type, service, dns_status, ip_class, resolved_ips, first_seen, last_seen)
+                    (mnc, mcc, operator, country_name, fqdn, record_type, service, dns_status, last_query_status, ip_class, resolved_ips, first_seen, last_seen, last_checked)
                 VALUES
-                    (:mnc, :mcc, :operator, :country_name, :fqdn, :record_type, :service, :dns_status, :ip_class, :resolved_ips, :now, :now)
-                ON CONFLICT(fqdn, record_type) DO UPDATE SET
+                    (:mnc, :mcc, :operator, :country_name, :fqdn, :record_type, :service, :dns_status, :dns_status, :ip_class, :resolved_ips, :now, :last_seen, :now)
+                ON CONFLICT DO UPDATE SET
+                    operator     = excluded.operator,
+                    country_name = excluded.country_name,
                     service      = excluded.service,
-                    dns_status   = excluded.dns_status,
-                    ip_class     = excluded.ip_class,
-                    resolved_ips = excluded.resolved_ips,
-                    last_seen    = excluded.last_seen
+                    dns_status   = CASE WHEN excluded.last_query_status IN ('ANSWERED', 'NXDOMAIN', 'NODATA') THEN excluded.last_query_status ELSE available_fqdns.dns_status END,
+                    last_query_status = excluded.last_query_status,
+                    ip_class     = CASE WHEN excluded.last_query_status = 'ANSWERED' THEN excluded.ip_class ELSE available_fqdns.ip_class END,
+                    resolved_ips = CASE WHEN excluded.last_query_status = 'ANSWERED' THEN excluded.resolved_ips ELSE available_fqdns.resolved_ips END,
+                    last_seen    = CASE WHEN excluded.dns_status = 'ANSWERED' THEN excluded.last_checked ELSE available_fqdns.last_seen END,
+                    last_checked = excluded.last_checked
                 """,
                 {
                     "mnc":          result["mnc"],
@@ -248,6 +266,7 @@ def save_result(conn: sqlite3.Connection, result: dict) -> None:
                     "ip_class":     fqdn_entry["ip_class"],
                     "resolved_ips": fqdn_entry["resolved_ips"],
                     "now":          now,
+                    "last_seen":    now if fqdn_entry["dns_status"] == "ANSWERED" else None,
                 },
             )
 
@@ -270,6 +289,7 @@ def print_summary(conn: sqlite3.Connection) -> None:
                COUNT(DISTINCT mcc || '-' || mnc) AS operators,
                COUNT(*) AS total_fqdns
         FROM available_fqdns
+        WHERE dns_status = 'ANSWERED'
         GROUP BY country_name
         ORDER BY total_fqdns DESC
         LIMIT 20
@@ -287,6 +307,7 @@ def print_summary(conn: sqlite3.Connection) -> None:
         SELECT COALESCE(service, 'other') AS service,
                COUNT(DISTINCT mcc || '-' || mnc) AS operators
         FROM available_fqdns
+        WHERE dns_status = 'ANSWERED'
         GROUP BY service
         ORDER BY operators DESC
         """
@@ -296,7 +317,7 @@ def print_summary(conn: sqlite3.Connection) -> None:
         print(f"  {row[0]:<20} {row[1]:>5} operators")
 
     totals = conn.execute(
-        "SELECT COUNT(*) AS fqdns, COUNT(DISTINCT country_name) AS countries FROM available_fqdns"
+        "SELECT COUNT(*) AS fqdns, COUNT(DISTINCT country_name) AS countries FROM available_fqdns WHERE dns_status = 'ANSWERED'"
     ).fetchone()
     print(f"\nTotal FQDNs found : {totals['fqdns']}")
     print(f"Countries covered : {totals['countries']}")
@@ -348,7 +369,10 @@ def main():
                 result = future.result()
                 if result:
                     save_result(conn, result)
-                    found_this = len(result.get("found", []))
+                    found_this = sum(
+                        entry["dns_status"] == "ANSWERED" and bool(entry["resolved_ips"])
+                        for entry in result.get("records", [])
+                    )
                     found_total += found_this
                     if found_this:
                         log.info(

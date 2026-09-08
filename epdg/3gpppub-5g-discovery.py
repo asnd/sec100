@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS fiveg_fqdns (
     record_type  TEXT    NOT NULL DEFAULT 'A',
     resolved_ips TEXT,
     dns_zone     TEXT,   -- '5gc' or 'pub' or 'tlsa' or 'srv'
+    dns_source   TEXT NOT NULL DEFAULT 'public', -- 'public' or 'grx'
     dns_server   TEXT,   -- resolver used ('public' or IP of GRX resolver)
     first_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_seen    TIMESTAMP,
@@ -146,6 +147,34 @@ def make_resolver(dns_server: str | None) -> dns.resolver.Resolver:
         r.nameservers = [dns_server]
         log.info("Using custom DNS server: %s", dns_server)
     return r
+
+
+def operator_n3iwf_fqdn(mnc: int, mcc: int) -> str:
+    """Build the operator-identifier N3IWF FQDN from TS 23.003."""
+    return f"n3iwf.5gc.mnc{mnc:03d}.mcc{mcc:03d}.pub.3gppnetwork.org"
+
+
+def tai_n3iwf_fqdn(mnc: int, mcc: int, tac: int | str, three_octet: bool = True) -> str:
+    """Build a 2-byte or 5GS 3-byte TAI-based N3IWF FQDN."""
+    value = int(tac, 0) if isinstance(tac, str) else tac
+    maximum = 0xFFFFFF if three_octet else 0xFFFF
+    if not 0 <= value <= maximum:
+        raise ValueError(f"TAC must be between 0 and {maximum:#x}")
+    encoded = f"{value:06x}" if three_octet else f"{value:04x}"
+    labels = [f"tac-lb{encoded[-2:]}"]
+    if three_octet:
+        labels.append(f"tac-mb{encoded[-4:-2]}")
+        labels.append(f"tac-hb{encoded[:2]}")
+        labels.append("5gstac")
+    else:
+        labels.extend([f"tac-hb{encoded[:2]}", "tac"])
+    return ".".join(labels) + f".n3iwf.5gc.mnc{mnc:03d}.mcc{mcc:03d}.pub.3gppnetwork.org"
+
+
+def visited_country_n3iwf_fqdn(mcc: int, onboarding: bool = False) -> str:
+    """Build the visited-country N3IWF discovery FQDN."""
+    prefix = "onboarding." if onboarding else ""
+    return f"{prefix}n3iwf.5gc.mcc{mcc:03d}.visited-country.pub.3gppnetwork.org"
 
 
 def resolve_fqdn(
@@ -176,6 +205,21 @@ def resolve_tlsa(fqdn: str, resolver: dns.resolver.Resolver) -> list[str]:
         return []
 
 
+def resolve_naptr_replacements(fqdn: str, resolver: dns.resolver.Resolver) -> list[str]:
+    """Return NAPTR replacement names used by visited-country discovery."""
+    try:
+        answers = resolver.resolve(fqdn, "NAPTR")
+        return sorted({
+            str(record.replacement).rstrip(".")
+            for record in answers
+            if str(record.replacement) not in {"", "."}
+        })
+    except (NXDOMAIN, NoAnswer, Timeout):
+        return []
+    except Exception:
+        return []
+
+
 def resolve_srv_n32(fqdn: str, resolver: dns.resolver.Resolver) -> list[str]:
     """Query SRV for N32 (SEPP inter-PLMN) interface."""
     srv_name = f"_n32._tcp.{fqdn}"
@@ -193,6 +237,9 @@ def probe_operator_5g(
     resolver: dns.resolver.Resolver,
     dns_server_label: str,
     include_pub_zone: bool,
+    tacs: list[int] | None = None,
+    include_visited_country: bool = True,
+    onboarding: bool = False,
 ) -> dict:
     try:
         mcc = int(item["mcc"])
@@ -207,6 +254,16 @@ def probe_operator_5g(
     base_pub = DOMAIN_PUB.format(mnc=mnc, mcc=mcc)
 
     found = []
+
+    def add_n3iwf_target(fqdn: str, zone: str) -> None:
+        for rtype in record_types:
+            ips = resolve_fqdn(fqdn, rtype, resolver)
+            if ips:
+                found.append({
+                    "nf_type": "n3iwf", "fqdn": fqdn,
+                    "record_type": rtype, "resolved_ips": ",".join(ips),
+                    "dns_zone": zone,
+                })
 
     # ── 5GC zone (works well on GRX, hit-or-miss on public) ──────────────────
     for nf in nf_types:
@@ -247,6 +304,25 @@ def probe_operator_5g(
                 })
                 log.info("  [SRV]  [+] SEPP N32 %s → %s", fqdn, srv)
 
+    # N3IWF has operator, TAI, and visited-country discovery forms.
+    if "nrf" in nf_types or "n3iwf" in nf_types or tacs or include_visited_country:
+        add_n3iwf_target(operator_n3iwf_fqdn(mnc, mcc), "n3iwf-operator")
+        for tac in tacs or []:
+            add_n3iwf_target(tai_n3iwf_fqdn(mnc, mcc, tac, True), "n3iwf-tai-5gs")
+            if tac <= 0xFFFF:
+                add_n3iwf_target(tai_n3iwf_fqdn(mnc, mcc, tac, False), "n3iwf-tai-2octet")
+        if include_visited_country:
+            visited = visited_country_n3iwf_fqdn(mcc, onboarding)
+            replacements = resolve_naptr_replacements(visited, resolver)
+            if replacements:
+                found.append({
+                    "nf_type": "n3iwf", "fqdn": visited,
+                    "record_type": "NAPTR", "resolved_ips": " | ".join(replacements),
+                    "dns_zone": "n3iwf-visited-country",
+                })
+                for replacement in replacements:
+                    add_n3iwf_target(replacement, "n3iwf-naptr-target")
+
     # ── pub zone — non-standard but observed in the wild ─────────────────────
     if include_pub_zone:
         for nf in PUBLIC_LIKELY_NF_TYPES:
@@ -269,6 +345,7 @@ def probe_operator_5g(
         "mnc": mnc, "mcc": mcc,
         "operator": operator, "country_name": country_name,
         "dns_server": dns_server_label,
+        "dns_source": "grx" if dns_server_label != "public" else "public",
         "found": found,
     }
 
@@ -277,6 +354,9 @@ def init_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA_5G)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(fiveg_fqdns)")}
+    if "dns_source" not in columns:
+        conn.execute("ALTER TABLE fiveg_fqdns ADD COLUMN dns_source TEXT NOT NULL DEFAULT 'public'")
     conn.commit()
     return conn
 
@@ -291,11 +371,11 @@ def save_5g_result(conn: sqlite3.Connection, result: dict) -> None:
                 """
                 INSERT INTO fiveg_fqdns
                     (mnc, mcc, operator, country_name, nf_type, fqdn,
-                     record_type, resolved_ips, dns_zone, dns_server,
+                     record_type, resolved_ips, dns_zone, dns_source, dns_server,
                      first_seen, last_seen)
                 VALUES
                     (:mnc, :mcc, :operator, :country_name, :nf_type, :fqdn,
-                     :record_type, :resolved_ips, :dns_zone, :dns_server,
+                     :record_type, :resolved_ips, :dns_zone, :dns_source, :dns_server,
                      :now, :now)
                 ON CONFLICT(fqdn, record_type) DO UPDATE SET
                     resolved_ips = excluded.resolved_ips,
@@ -311,6 +391,7 @@ def save_5g_result(conn: sqlite3.Connection, result: dict) -> None:
                     "record_type":  entry["record_type"],
                     "resolved_ips": entry["resolved_ips"],
                     "dns_zone":     entry["dns_zone"],
+                    "dns_source":   result["dns_source"],
                     "dns_server":   result["dns_server"],
                     "now":          now,
                 },
@@ -416,6 +497,18 @@ DNS Zone Notes:
         "--include-pub-zone", action="store_true",
         help="Also probe sepp/nrf under pub.3gppnetwork.org (non-standard patterns)",
     )
+    parser.add_argument(
+        "--tac", nargs="+", type=lambda value: int(value, 0), metavar="TAC",
+        help="Probe TAI-based N3IWF FQDNs for TAC values (decimal or 0x-prefixed hex)",
+    )
+    parser.add_argument(
+        "--no-visited-country", action="store_true",
+        help="Disable visited-country N3IWF and NAPTR replacement discovery",
+    )
+    parser.add_argument(
+        "--onboarding", action="store_true",
+        help="Use the TS 23.003 visited-country onboarding N3IWF FQDN",
+    )
     parser.add_argument("--summary-only", action="store_true")
     args = parser.parse_args()
 
@@ -459,6 +552,7 @@ DNS Zone Notes:
             executor.submit(
                 probe_operator_5g, item, args.nf_types, record_types,
                 resolver, dns_server_label, args.include_pub_zone,
+                args.tac, not args.no_visited_country, args.onboarding,
             ): item
             for item in operators
         }

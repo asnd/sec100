@@ -26,6 +26,7 @@ import socket
 import sqlite3
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 logging.basicConfig(
@@ -116,54 +117,69 @@ def cymru_bulk_lookup(ips: list[str]) -> dict[str, dict]:
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
-ENRICH_COLUMNS = {
-    "asn":              "TEXT",
-    "asn_org":          "TEXT",
-    "hosting_provider": "TEXT",
-    "ip_country":       "TEXT",
-    "bgp_prefix":       "TEXT",
-}
-
 def ensure_columns(conn: sqlite3.Connection) -> None:
-    existing = {row[1] for row in conn.execute("PRAGMA table_info(available_fqdns)")}
-    for col, coltype in ENRICH_COLUMNS.items():
-        if col not in existing:
-            conn.execute(f"ALTER TABLE available_fqdns ADD COLUMN {col} {coltype}")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS ip_enrichment (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            fqdn             TEXT NOT NULL,
+            record_type      TEXT NOT NULL,
+            ip               TEXT NOT NULL,
+            asn              TEXT,
+            asn_org          TEXT,
+            hosting_provider TEXT,
+            ip_country       TEXT,
+            bgp_prefix       TEXT,
+            enriched_at      TIMESTAMP NOT NULL,
+            UNIQUE(fqdn, record_type, ip)
+        );
+        CREATE INDEX IF NOT EXISTS idx_enrichment_ip ON ip_enrichment(ip);
+    """)
     conn.commit()
 
 
-def get_unenriched_ips(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    """Return (rowid, ip) pairs that still need enrichment."""
+def get_unenriched_ips(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """Return (fqdn, record_type, ip) triples that still need enrichment."""
     rows = conn.execute(
         """
-        SELECT id, resolved_ips
+        SELECT fqdn, record_type, resolved_ips
         FROM available_fqdns
-        WHERE resolved_ips IS NOT NULL
+        WHERE dns_status = 'ANSWERED'
+          AND resolved_ips IS NOT NULL
           AND resolved_ips != ''
-          AND (asn IS NULL OR asn = '')
         """
     ).fetchall()
     pairs = []
-    for row_id, ip_csv in rows:
+    for fqdn, record_type, ip_csv in rows:
         for ip in ip_csv.split(","):
             ip = ip.strip()
             if ip:
-                pairs.append((row_id, ip))
-    return pairs
+                pairs.append((fqdn, record_type, ip))
+    existing = {
+        (row[0], row[1], row[2])
+        for row in conn.execute("SELECT fqdn, record_type, ip FROM ip_enrichment")
+    }
+    return [pair for pair in pairs if pair not in existing]
 
 
-def apply_enrichment(conn: sqlite3.Connection, row_id: int, info: dict) -> None:
+def apply_enrichment(
+    conn: sqlite3.Connection, fqdn: str, record_type: str, ip: str, info: dict
+) -> None:
     conn.execute(
         """
-        UPDATE available_fqdns
-        SET asn = :asn,
-            asn_org = :asn_org,
-            hosting_provider = :hosting_provider,
-            ip_country = :ip_country,
-            bgp_prefix = :prefix
-        WHERE id = :id
+        INSERT INTO ip_enrichment
+            (fqdn, record_type, ip, asn, asn_org, hosting_provider, ip_country, bgp_prefix, enriched_at)
+        VALUES
+            (:fqdn, :record_type, :ip, :asn, :asn_org, :hosting_provider, :ip_country, :prefix, :now)
+        ON CONFLICT(fqdn, record_type, ip) DO UPDATE SET
+            asn = excluded.asn,
+            asn_org = excluded.asn_org,
+            hosting_provider = excluded.hosting_provider,
+            ip_country = excluded.ip_country,
+            bgp_prefix = excluded.bgp_prefix,
+            enriched_at = excluded.enriched_at
         """,
-        {**info, "id": row_id},
+        {**info, "fqdn": fqdn, "record_type": record_type, "ip": ip,
+         "now": datetime.now(timezone.utc).isoformat()},
     )
 
 
@@ -172,7 +188,7 @@ def print_summary(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
         SELECT hosting_provider, COUNT(*) AS cnt
-        FROM available_fqdns
+        FROM ip_enrichment
         WHERE hosting_provider IS NOT NULL
         GROUP BY hosting_provider
         ORDER BY cnt DESC
@@ -187,7 +203,7 @@ def print_summary(conn: sqlite3.Connection) -> None:
     asn_rows = conn.execute(
         """
         SELECT asn, asn_org, COUNT(*) AS cnt
-        FROM available_fqdns
+        FROM ip_enrichment
         WHERE asn IS NOT NULL
         GROUP BY asn
         ORDER BY cnt DESC
@@ -200,11 +216,12 @@ def print_summary(conn: sqlite3.Connection) -> None:
     print("\n─── Operators on Cloud vs On-premises ───────────────────────────────")
     cloud_ops = conn.execute(
         """
-        SELECT hosting_provider,
-               COUNT(DISTINCT mcc || '-' || mnc) AS operators
-        FROM available_fqdns
-        WHERE hosting_provider IS NOT NULL
-        GROUP BY hosting_provider
+        SELECT e.hosting_provider,
+               COUNT(DISTINCT f.mcc || '-' || f.mnc) AS operators
+        FROM ip_enrichment e
+        JOIN available_fqdns f ON f.fqdn = e.fqdn AND f.record_type = e.record_type
+        WHERE e.hosting_provider IS NOT NULL
+        GROUP BY e.hosting_provider
         ORDER BY operators DESC
         """
     ).fetchall()
@@ -247,8 +264,8 @@ def main():
 
     # Deduplicate IPs while remembering which row IDs need each
     ip_to_rows: dict[str, list[int]] = {}
-    for row_id, ip in pairs:
-        ip_to_rows.setdefault(ip, []).append(row_id)
+    for fqdn, record_type, ip in pairs:
+        ip_to_rows.setdefault(ip, []).append((fqdn, record_type))
 
     unique_ips = list(ip_to_rows.keys())
     enriched = 0
@@ -259,8 +276,8 @@ def main():
         results = cymru_bulk_lookup(batch)
 
         for ip, info in results.items():
-            for row_id in ip_to_rows.get(ip, []):
-                apply_enrichment(conn, row_id, info)
+            for fqdn, record_type in ip_to_rows.get(ip, []):
+                apply_enrichment(conn, fqdn, record_type, ip, info)
                 enriched += 1
 
         conn.commit()

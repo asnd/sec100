@@ -52,8 +52,21 @@ func (db *DB) InitSchema() error {
 	// Best-effort migrations for databases created with older schema versions.
 	migrations := []string{
 		"ALTER TABLE operators ADD COLUMN country_name TEXT",
+		"ALTER TABLE operators ADD COLUMN country_code TEXT",
+		"ALTER TABLE operators ADD COLUMN last_scanned TIMESTAMP",
 		"ALTER TABLE available_fqdns ADD COLUMN mnc INTEGER",
 		"ALTER TABLE available_fqdns ADD COLUMN mcc INTEGER",
+		"ALTER TABLE available_fqdns ADD COLUMN country_name TEXT",
+		"ALTER TABLE available_fqdns ADD COLUMN record_type TEXT NOT NULL DEFAULT 'A'",
+		"ALTER TABLE available_fqdns ADD COLUMN service TEXT",
+		"ALTER TABLE available_fqdns ADD COLUMN dns_status TEXT",
+		"ALTER TABLE available_fqdns ADD COLUMN last_query_status TEXT",
+		"ALTER TABLE available_fqdns ADD COLUMN ip_class TEXT",
+		"ALTER TABLE available_fqdns ADD COLUMN resolved_ips TEXT",
+		"ALTER TABLE available_fqdns ADD COLUMN first_seen TIMESTAMP",
+		"ALTER TABLE available_fqdns ADD COLUMN last_seen TIMESTAMP",
+		"ALTER TABLE available_fqdns ADD COLUMN last_checked TIMESTAMP",
+		"ALTER TABLE fiveg_fqdns ADD COLUMN dns_source TEXT NOT NULL DEFAULT 'public'",
 		"CREATE INDEX IF NOT EXISTS idx_fqdns_mnc_mcc ON available_fqdns(mnc, mcc)",
 	}
 
@@ -80,14 +93,26 @@ func (db *DB) InsertResults(results []models.DNSResult) error {
 	}
 	defer tx.Rollback()
 
-	// Prepare statements with INSERT OR IGNORE to avoid unique constraint violations
-	operatorStmt, err := tx.Prepare("INSERT OR IGNORE INTO operators (mnc, mcc, operator, country_name) VALUES (?, ?, ?, ?)")
+	operatorStmt, err := tx.Prepare(`
+		INSERT INTO operators (mnc, mcc, operator, country_name, last_scanned)
+		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT DO UPDATE SET
+			operator = excluded.operator, country_name = excluded.country_name,
+			last_scanned = excluded.last_scanned`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare operator statement: %w", err)
 	}
 	defer operatorStmt.Close()
 
-	fqdnStmt, err := tx.Prepare("INSERT OR IGNORE INTO available_fqdns (mnc, mcc, operator, fqdn) VALUES (?, ?, ?, ?)")
+	fqdnStmt, err := tx.Prepare(`
+		INSERT INTO available_fqdns
+			(mnc, mcc, operator, country_name, fqdn, record_type, service, dns_status, ip_class, resolved_ips, first_seen, last_seen, last_checked)
+		VALUES (?, ?, ?, ?, ?, 'A', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT DO UPDATE SET
+			operator = excluded.operator, country_name = excluded.country_name,
+			service = excluded.service, dns_status = excluded.dns_status,
+			ip_class = excluded.ip_class, resolved_ips = excluded.resolved_ips,
+			last_seen = excluded.last_seen, last_checked = excluded.last_checked`)
 	if err != nil {
 		return fmt.Errorf("failed to prepare fqdn statement: %w", err)
 	}
@@ -101,7 +126,10 @@ func (db *DB) InsertResults(results []models.DNSResult) error {
 		}
 
 		// Insert FQDN
-		_, err = fqdnStmt.Exec(result.MNC, result.MCC, result.Operator, result.FQDN)
+		_, err = fqdnStmt.Exec(
+			result.MNC, result.MCC, result.Operator, result.Country, result.FQDN,
+			result.Subdomain, result.DNSStatus, result.IPClass, strings.Join(result.IPs, ","),
+		)
 		if err != nil {
 			return fmt.Errorf("failed to insert fqdn: %w", err)
 		}

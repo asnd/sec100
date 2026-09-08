@@ -61,10 +61,21 @@ func TestBuildFQDN(t *testing.T) {
 			mcc:       460,
 			expected:  "xcap.ims.mnc000.mcc460.pub.3gppnetwork.org",
 		},
+		{
+			subdomain: "",
+			mnc:       1,
+			mcc:       310,
+			expected:  "mnc001.mcc310.gprs",
+		},
 	}
 
 	for _, tt := range tests {
-		result := BuildFQDN(tt.subdomain, tt.mnc, tt.mcc, "pub.3gppnetwork.org")
+		var result string
+		if tt.subdomain == "" {
+			result = BuildFQDN(tt.subdomain, tt.mnc, tt.mcc, "gprs")
+		} else {
+			result = BuildFQDN(tt.subdomain, tt.mnc, tt.mcc, "pub.3gppnetwork.org")
+		}
 		if result != tt.expected {
 			t.Errorf("BuildFQDN(%s, %d, %d) = %s, expected %s",
 				tt.subdomain, tt.mnc, tt.mcc, result, tt.expected)

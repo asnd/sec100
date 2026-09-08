@@ -31,8 +31,10 @@ RUN pip install --no-cache-dir -r /app/epdg/requirements.txt
 
 # Copy application code
 COPY epdg/ /app/epdg/
+COPY tests/ /app/tests/
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+RUN python3 -m unittest discover -s /app/tests -p 'test_*.py'
 
 # Data directory — mount a host directory here at runtime
 VOLUME ["/data"]

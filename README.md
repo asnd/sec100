@@ -82,6 +82,23 @@ streamlit run epdg/stream-oplookup.py
 | `3gpppub-grx-access.py` | — | GRX/IPX DNS helper: RIPE Atlas, open-resolver discovery, zone walk |
 | `3gpppub-dns-checker.py` | — | Lightweight TSV checker (no DB required) |
 
+The 5G discovery script supports the TS 23.003 N3IWF discovery forms:
+
+```bash
+# Probe operator and visited-country N3IWF names through public DNS
+python3 epdg/3gpppub-5g-discovery.py --nf-types nrf sepp --include-pub-zone
+
+# Add 5GS TAI-based discovery; TAC accepts decimal or 0x-prefixed hex
+python3 epdg/3gpppub-5g-discovery.py --tac 0x0B1A21 0x1234
+
+# Use an authorized GRX/IPX resolver and label the source as GRX
+python3 epdg/3gpppub-5g-discovery.py --dns-server 192.0.2.53 --tac 0x0B1A21
+```
+
+TAI, visited-country, onboarding, NAPTR replacement, DNS source, and resolver
+observations are stored in `fiveg_fqdns`. See [ROADMAP.md](ROADMAP.md) for the
+broader telco discovery roadmap and comparable tools.
+
 ### Operator Capability Scoring (0–120 pts)
 
 | Service | Points | Indicator |
@@ -116,6 +133,10 @@ streamlit run epdg/stream-oplookup.py
 | `build` | Go: linux-amd64, linux-arm64, linux-arm, macos-amd64, macos-arm64, windows-amd64, static |
 | `lint` | python_syntax, python_lint (ruff), bash_lint (shellcheck), yaml_lint |
 | `test` | python_imports, cli_help (--help smoke), db_schema (in-memory SQLite) |
+
+GitHub Actions additionally runs the Python unit tests, Go tests, and a Docker
+image build. The Docker build runs the discovery tests inside the image; use
+`docker build -t 3gpp-explorer .` or the equivalent Podman command locally.
 
 ---
 
