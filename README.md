@@ -146,6 +146,7 @@ streamlit run epdg/stream-oplookup.py
 GitHub Actions additionally runs the Python unit tests, Go tests, and a Docker
 image build. The Docker build runs the discovery tests inside the image; use
 `docker build -t 3gpp-explorer .` or the equivalent Podman command locally.
+See [TESTING.md](TESTING.md) for the test matrix and local commands.
 
 ---
 

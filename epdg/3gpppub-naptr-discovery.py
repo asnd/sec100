@@ -210,22 +210,34 @@ def save_naptr_result(conn: sqlite3.Connection, result: dict) -> None:
         for rec in result.get("naptr", []):
             conn.execute(
                 """
-                INSERT OR IGNORE INTO naptr_records
+                INSERT INTO naptr_records
                     (base_fqdn, order_val, preference, flags, service, regexp,
                      replacement, operator, country_name, mnc, mcc, first_seen)
-                VALUES (:base_fqdn, :order_val, :preference, :flags, :service, :regexp,
-                        :replacement, :operator, :country_name, :mnc, :mcc, :first_seen)
+                SELECT :base_fqdn, :order_val, :preference, :flags, :service, :regexp,
+                       :replacement, :operator, :country_name, :mnc, :mcc, :first_seen
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM naptr_records
+                    WHERE base_fqdn = :base_fqdn AND order_val = :order_val
+                      AND preference = :preference AND flags = :flags
+                      AND service = :service AND replacement = :replacement
+                )
                 """,
                 {**base, **rec, "first_seen": now},
             )
         for rec in result.get("srv", []):
             conn.execute(
                 """
-                INSERT OR IGNORE INTO srv_records
+                INSERT INTO srv_records
                     (query_name, priority, weight, port, target,
                      operator, country_name, mnc, mcc, source_fqdn, first_seen)
-                VALUES (:query_name, :priority, :weight, :port, :target,
-                        :operator, :country_name, :mnc, :mcc, :source_fqdn, :first_seen)
+                SELECT :query_name, :priority, :weight, :port, :target,
+                       :operator, :country_name, :mnc, :mcc, :source_fqdn, :first_seen
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM srv_records
+                    WHERE query_name = :query_name AND priority = :priority
+                      AND weight = :weight AND port = :port AND target = :target
+                      AND source_fqdn = :source_fqdn
+                )
                 """,
                 {
                     **base,
