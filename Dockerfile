@@ -11,6 +11,7 @@
 #   # Step 2: query
 #   docker run --rm -v $(pwd)/data:/data 3gpp-explorer stats
 #   docker run --rm -v $(pwd)/data:/data 3gpp-explorer score --top 10
+#   docker run --rm -v $(pwd)/data:/data 3gpp-explorer graph --summary --output /data/graph.json
 #
 #   # Step 3 (optional): web UI
 #   docker run -e ENABLE_WEBUI=1 -p 8501:8501 -v $(pwd)/data:/data 3gpp-explorer

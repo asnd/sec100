@@ -14,6 +14,7 @@
 #   search   <term>
 #   score    [--top N]
 #   export   [--format csv|json|tsv]
+#   graph    [--format json|csv|tsv]   PLMN/service/infrastructure graph
 #
 # Web UI (feature flag):
 #   docker run -e ENABLE_WEBUI=1 -p 8501:8501 -v $(pwd)/data:/data 3gpp-explorer
@@ -39,6 +40,11 @@ if [ "${1:-}" = "scan" ]; then
     shift
     echo "Scanning 3GPP public DNS → ${DB_PATH}"
     exec python3 /app/epdg/3gpppub-dns-database-population.py --db "$DB_PATH" "$@"
+fi
+
+if [ "${1:-}" = "graph" ]; then
+    shift
+    exec python3 /app/epdg/3gpppub-graph.py --db "$DB_PATH" "$@"
 fi
 
 # All other commands go to the CLI

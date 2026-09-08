@@ -78,7 +78,8 @@ streamlit run epdg/stream-oplookup.py
 | `3gpppub-5g-discovery.py` | 2 | 5G SA NF discovery (NRF, SEPP, AMF…) + DANE TLSA probing |
 | `3gpppub-diff.py` | 3 | Snapshot + change detection across scan runs |
 | `3gpppub-naptr-discovery.py` | 4 | NAPTR/SRV probing — IMS SIP topology, P-CSCF routing |
-| `stream-oplookup.py` | 5 | 7-tab Streamlit dashboard: capability scoring + ASN/hosting |
+| `stream-oplookup.py` | 5 | 8-tab Streamlit dashboard: capability scoring, ASN/hosting, relationship graph |
+| `3gpppub-graph.py` | 1 | PLMN → service → FQDN → IP/ASN/provider and NAPTR/SRV graph export |
 | `3gpppub-grx-access.py` | — | GRX/IPX DNS helper: RIPE Atlas, open-resolver discovery, zone walk |
 | `3gpppub-dns-checker.py` | — | Lightweight TSV checker (no DB required) |
 
@@ -93,11 +94,19 @@ python3 epdg/3gpppub-5g-discovery.py --tac 0x0B1A21 0x1234
 
 # Use an authorized GRX/IPX resolver and label the source as GRX
 python3 epdg/3gpppub-5g-discovery.py --dns-server 192.0.2.53 --tac 0x0B1A21
+
+# Build and export the current relationship graph
+python3 epdg/3gpppub-graph.py --db epdg/database.db --summary --output graph.json
 ```
 
 TAI, visited-country, onboarding, NAPTR replacement, DNS source, and resolver
 observations are stored in `fiveg_fqdns`. See [ROADMAP.md](ROADMAP.md) for the
 broader telco discovery roadmap and comparable tools.
+
+The graph exporter keeps a current materialized view in `graph_nodes` and
+`graph_edges`, while retaining inactive historical nodes and edges. It links
+shared infrastructure across operators and can emit JSON, CSV, or TSV for
+analysis in other tools.
 
 ### Operator Capability Scoring (0–120 pts)
 

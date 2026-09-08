@@ -19,10 +19,11 @@ These tools provide useful building blocks but are not focused on MCC/MNC-aware
 
 ## Priority features
 
-1. **Node graph and relationship explorer**
+1. **Node graph and relationship explorer** — **implemented**
 
    Model `PLMN → service → FQDN → CNAME/SRV target → IP → ASN → provider`,
-   including infrastructure shared across operators.
+   including infrastructure shared across operators. Use
+   `epdg/3gpppub-graph.py` or the dashboard’s Relationship Graph tab.
 
 2. **Resolver and geography comparison**
 

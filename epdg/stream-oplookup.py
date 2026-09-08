@@ -15,6 +15,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).parent))
 from subdomains import SERVICE_COLORS, SCORE_WEIGHTS, fqdn_to_service, sql_case_when
 from db_queries import open_db, query_fqdns, query_operators, compute_scores
+from graph import build_graph, graph_rows, graph_summary
 
 DB_PATH = Path(__file__).parent / "database.db"
 
@@ -97,9 +98,9 @@ st.divider()
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
 
-tab_country, tab_service, tab_operator, tab_raw, tab_map, tab_score, tab_asn = st.tabs(
+tab_country, tab_service, tab_operator, tab_raw, tab_map, tab_score, tab_asn, tab_graph = st.tabs(
     ["🌍 Country Stats", "📊 Service Breakdown", "🏢 Operator Lookup",
-     "📋 Raw Data", "🗺️ Map", "🏆 Capability Score", "🌐 ASN / Hosting"]
+     "📋 Raw Data", "🗺️ Map", "🏆 Capability Score", "🌐 ASN / Hosting", "🕸️ Relationship Graph"]
 )
 
 # ── Country Stats ──────────────────────────────────────────────────────────────
@@ -481,3 +482,25 @@ with tab_asn:
             use_container_width=True,
             hide_index=True,
         )
+
+# ── Relationship Graph ───────────────────────────────────────────────────────
+
+with tab_graph:
+    st.subheader("PLMN → service → FQDN → infrastructure")
+    st.caption("Links discovered endpoints to shared IPs, ASNs, providers, NAPTR replacements and SRV targets.")
+    graph_conn = get_conn()
+    graph_counts = build_graph(graph_conn)
+    m1, m2 = st.columns(2)
+    m1.metric("Active nodes", graph_counts["nodes"])
+    m2.metric("Active relationships", graph_counts["edges"])
+    relationships = ["All"] + sorted(graph_counts.get("relationships", {}))
+    selected_relationship = st.selectbox("Relationship", relationships)
+    graph_df = pd.DataFrame(graph_rows(
+        graph_conn,
+        relationship=None if selected_relationship == "All" else selected_relationship,
+        limit=2000,
+    ))
+    if graph_df.empty:
+        st.info("No graph relationships are available yet. Run a scan and optional enrichment jobs first.")
+    else:
+        st.dataframe(graph_df, use_container_width=True, hide_index=True)

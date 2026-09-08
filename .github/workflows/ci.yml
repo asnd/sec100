@@ -19,6 +19,7 @@ jobs:
           python epdg/3gpppub-5g-discovery.py --help
           python epdg/3gpppub-dns-checker.py --help
           python epdg/3gpppub-diff.py --help
+          python epdg/3gpppub-graph.py --help
 
   go:
     runs-on: ubuntu-latest
