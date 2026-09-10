@@ -20,6 +20,7 @@ jobs:
           python epdg/3gpppub-dns-checker.py --help
           python epdg/3gpppub-diff.py --help
           python epdg/3gpppub-graph.py --help
+          python epdg/3gpppub-resolver-compare.py --help
 
   go:
     runs-on: ubuntu-latest

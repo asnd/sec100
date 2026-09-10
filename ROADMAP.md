@@ -25,11 +25,12 @@ These tools provide useful building blocks but are not focused on MCC/MNC-aware
    including infrastructure shared across operators. Use
    `epdg/3gpppub-graph.py` or the dashboard’s Relationship Graph tab.
 
-2. **Resolver and geography comparison**
+2. **Resolver and geography comparison** — **implemented**
 
    Store resolver, source ASN/country, DNSSEC result, TTL, response code, and
    answer set for public, DoH/DoT, authoritative, and authorized RIPE Atlas
-   vantage points.
+   vantage points. Use `epdg/3gpppub-resolver-compare.py`; observations are
+   retained in `dns_observations` for later comparison and posture scoring.
 
 3. **Authoritative DNS and delegation health**
 
