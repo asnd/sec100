@@ -18,6 +18,7 @@ The test modules cover:
 | `test_dns_features.py` | IP classification; ANSWERED/NODATA resolution; NAPTR-to-SRV filtering; idempotent NAPTR/SRV persistence |
 | `test_cli_and_graph.py` | Graph CLI help, JSON and filtered CSV exports, temporary SQLite database integration |
 | `test_resolver_compare.py` | Resolver response normalization, TTL/DNSSEC/source metadata, latest-per-resolver comparison |
+| `test_dns_health.py` | NS/SOA/CNAME checks, nameserver reachability and persisted delegation health |
 
 The Dockerfile runs the complete discovery suite during image construction.
 GitHub Actions additionally runs Python syntax checks, the same unit suite,

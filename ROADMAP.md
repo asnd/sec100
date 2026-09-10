@@ -32,10 +32,11 @@ These tools provide useful building blocks but are not focused on MCC/MNC-aware
    vantage points. Use `epdg/3gpppub-resolver-compare.py`; observations are
    retained in `dns_observations` for later comparison and posture scoring.
 
-3. **Authoritative DNS and delegation health**
+3. **Authoritative DNS and delegation health** — **implemented**
 
    Track NS, SOA, DNSSEC delegation, CNAME chains, TTLs, lame/dead
-   nameservers, and inconsistent authoritative answers.
+   nameservers, and inconsistent authoritative answers. Use
+   `epdg/3gpppub-dns-health.py`; results are stored in `dns_health`.
 
 4. **3GPP naming-template registry**
 

@@ -277,6 +277,7 @@ cli_help:
     - python3 $SCRIPTS_DIR/3gpppub-diff.py --help
     - python3 $SCRIPTS_DIR/3gpppub-graph.py --help
     - python3 $SCRIPTS_DIR/3gpppub-resolver-compare.py --help
+    - python3 $SCRIPTS_DIR/3gpppub-dns-health.py --help
     - python3 $SCRIPTS_DIR/3gpppub-grx-access.py --help
     - python3 $SCRIPTS_DIR/3gpppub-cli.py --help
     - python3 $SCRIPTS_DIR/3gpppub-cli.py stats --help

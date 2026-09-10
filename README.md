@@ -81,6 +81,7 @@ streamlit run epdg/stream-oplookup.py
 | `stream-oplookup.py` | 5 | 8-tab Streamlit dashboard: capability scoring, ASN/hosting, relationship graph |
 | `3gpppub-graph.py` | 1 | PLMN → service → FQDN → IP/ASN/provider and NAPTR/SRV graph export |
 | `3gpppub-resolver-compare.py` | 2 | Resolver/vantage comparison with response, TTL, DNSSEC and answer evidence |
+| `3gpppub-dns-health.py` | 3 | Authoritative NS/SOA/CNAME, DNSSEC and nameserver health checks |
 | `3gpppub-grx-access.py` | — | GRX/IPX DNS helper: RIPE Atlas, open-resolver discovery, zone walk |
 | `3gpppub-dns-checker.py` | — | Lightweight TSV checker (no DB required) |
 
@@ -103,6 +104,9 @@ python3 epdg/3gpppub-graph.py --db epdg/database.db --summary --output graph.jso
 python3 epdg/3gpppub-resolver-compare.py \
   epdg.epc.mnc001.mcc310.pub.3gppnetwork.org \
   --resolver system --resolver grx=192.0.2.53 --source-country NO --json
+
+# Check delegation health and persist the result
+python3 epdg/3gpppub-dns-health.py pub.3gppnetwork.org --json
 ```
 
 TAI, visited-country, onboarding, NAPTR replacement, DNS source, and resolver

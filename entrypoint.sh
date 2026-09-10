@@ -16,6 +16,7 @@
 #   export   [--format csv|json|tsv]
 #   graph    [--format json|csv|tsv]   PLMN/service/infrastructure graph
 #   resolver  FQDN [--resolver NAME=IP] Resolver comparison
+#   health    FQDN [--resolver NAME=IP] Authoritative DNS health
 #
 # Web UI (feature flag):
 #   docker run -e ENABLE_WEBUI=1 -p 8501:8501 -v $(pwd)/data:/data 3gpp-explorer
@@ -51,6 +52,11 @@ fi
 if [ "${1:-}" = "resolver" ]; then
     shift
     exec python3 /app/epdg/3gpppub-resolver-compare.py --db "$DB_PATH" "$@"
+fi
+
+if [ "${1:-}" = "health" ]; then
+    shift
+    exec python3 /app/epdg/3gpppub-dns-health.py --db "$DB_PATH" "$@"
 fi
 
 # All other commands go to the CLI
