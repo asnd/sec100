@@ -19,6 +19,7 @@ The test modules cover:
 | `test_cli_and_graph.py` | Graph CLI help, JSON and filtered CSV exports, temporary SQLite database integration |
 | `test_resolver_compare.py` | Resolver response normalization, TTL/DNSSEC/source metadata, latest-per-resolver comparison |
 | `test_dns_health.py` | NS/SOA/CNAME checks, nameserver reachability and persisted delegation health |
+| `test_ike_phase1.py` | IKEv2 SA/KE/Nonce and IKEv1 Main Mode packets; cookie/notification validation; malformed replies; IPv6/NAT-T; transport outcomes; additive SQLite history and target filters |
 
 The Dockerfile runs the complete discovery suite during image construction.
 GitHub Actions additionally runs Python syntax checks, the same unit suite,

@@ -143,6 +143,61 @@ python3 epdg/3gpppub-diff.py --snapshot --label "$(date +%Y-%m-%d)"
 streamlit run epdg/stream-oplookup.py
 ```
 
+### IKEv2 / IPsec Phase 1 reachability
+
+`epdg/3gpppub-tls-ike-probe.py` reads discovered public addresses from
+`available_fqdns`. It sends a complete IKEv2 `IKE_SA_INIT` (SA, MODP-2048 key
+exchange, nonce), supports IPv4/IPv6 and the UDP 4500 non-ESP marker, and
+optionally sends an IKEv1 Main Mode SA proposal. Each IP/port/version receives
+one packet; there are no retransmissions, cookie retries, or authentication.
+Loopback placeholders such as `127.0.0.1` and other non-global addresses are skipped.
+
+```bash
+# Preview Kyivstar targets from an existing scanner SQLite database
+python3 epdg/3gpppub-tls-ike-probe.py --db /path/to/database.db \
+  --ike-only --mcc 255 --mnc 3
+
+# Run IKEv2 plus IKEv1 on UDP 500/4500 and persist outcomes
+python3 epdg/3gpppub-tls-ike-probe.py --db /path/to/database.db \
+  --active --ike-only --ikev1 --mcc 255 --mnc 3 \
+  --workers 2 --timeout 6 --source-label local-host
+
+python3 epdg/3gpppub-tls-ike-probe.py --db /path/to/database.db --summary-only
+```
+
+The additive schema creates `ike_phase1_observations` automatically in existing
+databases, retaining each run separately by observation ID. It stores UTC time,
+endpoint, IKE version/stage, offered proposal, source label, local socket address,
+timeout, RTT, raw response hex, validated payload types, notifications, vendor
+IDs, and any error. The existing `ike_probes` table remains the latest IKEv2
+summary; IKEv1 observations do not overwrite it.
+
+| Status | Meaning |
+|---|---|
+| `COOKIE_CHALLENGE` | Matching IKEv2 responder requested a cookie; no retry sent |
+| `IKE_NOTIFY_ERROR` | Matching IKE error notification, e.g. `NO_PROPOSAL_CHOSEN` |
+| `IKE_RESPONSE` | Other matching initial IKE response; authentication not completed |
+| `TIMEOUT` | No UDP reply before the configured timeout |
+| `SOCKET_ERROR` | Transport error, e.g. network unreachable or connection refused |
+| `INVALID_RESPONSE` | Datagram received but not a valid, matching initial IKE reply |
+
+Cookie challenges and error notifications demonstrate a responding IKE endpoint.
+Silence does not establish downtime, and an unknown vendor does not establish weak
+cryptography. `--source-label` describes the host executing the command; it does
+not select a remote Ukrainian probe. `local_ip` is the pre-NAT socket address,
+not necessarily the public source IP. Public ping looking glasses cannot execute
+these IKE probes.
+
+To inspect the stored evidence with a SQLite client:
+
+```sql
+SELECT observed_at, fqdn, ip, port, ike_version, source_label,
+       status, rtt_ms, notifications, error
+FROM ike_phase1_observations
+WHERE mcc = 255 AND mnc = 3
+ORDER BY observed_at DESC;
+```
+
 ---
 
 ## CI Pipeline (`.gitlab-ci.yml`)
